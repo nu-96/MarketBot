@@ -28,10 +28,28 @@ vi.mock('../../../src/memory/client-store', () => ({
     saveProfile: vi.fn().mockResolvedValue(undefined),
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
+    searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
   },
 }));
 
+const { mockCreate } = vi.hoisted(() => {
+  const mockCreate = vi.fn().mockResolvedValue({
+    content: [{ type: 'text', text: 'LLM response content' }],
+  });
+  return { mockCreate };
+});
+
+vi.mock('@anthropic-ai/sdk', () => {
+  const MockAnthropic = vi.fn(function (this: any) {
+    this.messages = { create: mockCreate };
+  });
+  return { default: MockAnthropic };
+});
+
 import { handleRepurpose, handleTrending } from '../../../src/cli/handlers/content';
+import { clientStore } from '../../../src/memory/client-store';
+import { stateStore } from '../../../src/core/state-store';
 
 function mockRL(answers: string[] = []) {
   let i = 0;
@@ -50,52 +68,24 @@ function mockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
   };
 }
 
+const acmeProfile = {
+  id: 'acme',
+  name: 'Acme',
+  industry: 'SaaS',
+  description: '',
+  goals: [],
+  platforms: [],
+  contacts: [],
+  preferences: {},
+};
+
 describe('handleRepurpose', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   });
 
-  it('should accept a description via topic in parsed and show repurpose info', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/repurpose',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/repurpose blog to twitter thread',
-        isNLP: false,
-        topic: 'blog to twitter thread',
-      } as ParsedCommand,
-    });
-
-    const result = await handleRepurpose(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('blog to twitter thread'))).toBe(true);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('not yet implemented'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/repurpose');
-  });
-
-  it('should extract description from rawInput when topic is not set', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/repurpose',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/repurpose newsletter to linkedin post',
-        isNLP: false,
-      } as ParsedCommand,
-    });
-
-    const result = await handleRepurpose(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('newsletter to linkedin post'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/repurpose');
-  });
-
-  it('should show usage info when no description is provided', async () => {
+  it('should show usage info when no args provided', async () => {
     const ctx = mockCtx({
       parsed: {
         command: '/repurpose',
@@ -111,19 +101,18 @@ describe('handleRepurpose', () => {
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
     expect(calls.some((msg: string) => msg.includes('Usage:'))).toBe(true);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('repurpose'))).toBe(true);
-    // Should not set lastHandler since it showed usage and returned early
+    expect(calls.some((msg: string) => msg.includes('<id> from <old-type> to <new-type>'))).toBe(true);
     expect(result.session.lastHandler).toBeNull();
   });
 
-  it('should show usage example with blog to twitter', async () => {
+  it('should show error on invalid format (missing from/to)', async () => {
     const ctx = mockCtx({
       parsed: {
         command: '/repurpose',
-        subcommand: '',
-        args: [],
+        subcommand: 'blog',
+        args: ['to', 'twitter'],
         flags: {},
-        rawInput: '/repurpose',
+        rawInput: '/repurpose blog to twitter',
         isNLP: false,
       } as ParsedCommand,
     });
@@ -131,36 +120,260 @@ describe('handleRepurpose', () => {
     await handleRepurpose(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('Example:'))).toBe(true);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('invalid format'))).toBe(true);
   });
 
-  it('should mention content repurposing is not yet implemented', async () => {
+  it('should require a client', async () => {
     const ctx = mockCtx({
       parsed: {
         command: '/repurpose',
-        subcommand: '',
-        args: [],
+        subcommand: 'job-12',
+        args: ['from', 'blog', 'to', 'twitter', 'thread'],
         flags: {},
-        rawInput: '/repurpose article to instagram captions',
+        rawInput: '/repurpose job-12 from blog to twitter thread',
         isNLP: false,
-        topic: 'article to instagram captions',
+      } as ParsedCommand,
+      rl: mockRL(['']),
+    });
+
+    await handleRepurpose(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('client') && msg.toLowerCase().includes('required'))).toBe(true);
+  });
+
+  it('should error when job not found', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.getJob).mockResolvedValue(null);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/repurpose',
+        subcommand: 'job-99',
+        args: ['from', 'blog', 'to', 'twitter', 'thread'],
+        flags: {},
+        rawInput: '/repurpose job-99 from blog to twitter thread',
+        isNLP: false,
       } as ParsedCommand,
     });
 
     await handleRepurpose(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('not yet implemented'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('job-99') && msg.toLowerCase().includes('not found'))).toBe(true);
+  });
+
+  it('should error when job has no content', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.getJob).mockResolvedValue({
+      id: 'job-12', clientId: 'acme', type: 'content', status: 'complete',
+      input: {}, iteration: 1, maxIterations: 3,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/repurpose',
+        subcommand: 'job-12',
+        args: ['from', 'blog', 'to', 'twitter', 'thread'],
+        flags: {},
+        rawInput: '/repurpose job-12 from blog to twitter thread',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleRepurpose(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.includes('no content'))).toBe(true);
+  });
+
+  it('should repurpose job content and set pending approval', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.getJob).mockResolvedValue({
+      id: 'job-12', clientId: 'acme', type: 'content', status: 'complete',
+      input: {}, output: { content: 'Original blog post about AI trends.' },
+      iteration: 1, maxIterations: 3,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } as any);
+    vi.mocked(stateStore.createJob).mockResolvedValue({} as any);
+    vi.mocked(stateStore.updateJob).mockResolvedValue({} as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/repurpose',
+        subcommand: 'job-12',
+        args: ['from', 'blog', 'to', 'twitter', 'thread'],
+        flags: {},
+        rawInput: '/repurpose job-12 from blog to twitter thread',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleRepurpose(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.includes('LLM response content'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('awaiting approval'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('approve'))).toBe(true);
+    expect(result.session.lastHandler).toBe('/repurpose');
+    expect(result.session.pendingApproval).toBeTruthy();
+
+    // Verify a job was created with human_review status
+    expect(stateStore.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'acme',
+        status: 'human_review',
+        type: 'repurpose',
+      }),
+    );
+    // Verify output was set via updateJob
+    expect(stateStore.updateJob).toHaveBeenCalledWith(
+      expect.stringContaining('repurpose-job-12'),
+      expect.objectContaining({
+        output: { content: 'LLM response content' },
+      }),
+    );
+
+    // Verify LLM received the source content with from/to types
+    const createCall = mockCreate.mock.calls[0];
+    const userMsg = createCall[0].messages[createCall[0].messages.length - 1].content;
+    expect(userMsg).toContain('blog');
+    expect(userMsg).toContain('twitter thread');
+    expect(userMsg).toContain('Original blog post about AI trends.');
+  });
+
+  it('should fall back to draft content when no output', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.getJob).mockResolvedValue({
+      id: 'job-5', clientId: 'acme', type: 'content', status: 'drafting',
+      input: {}, draft: { content: 'Draft newsletter content.' },
+      iteration: 1, maxIterations: 3,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } as any);
+    vi.mocked(stateStore.createJob).mockResolvedValue({} as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/repurpose',
+        subcommand: 'job-5',
+        args: ['from', 'newsletter', 'to', 'linkedin', 'post'],
+        flags: {},
+        rawInput: '/repurpose job-5 from newsletter to linkedin post',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleRepurpose(ctx);
+
+    const createCall = mockCreate.mock.calls[0];
+    const userMsg = createCall[0].messages[createCall[0].messages.length - 1].content;
+    expect(userMsg).toContain('Draft newsletter content.');
+    expect(userMsg).toContain('newsletter');
+    expect(userMsg).toContain('linkedin post');
+  });
+
+  it('should store conversation messages in session', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.getJob).mockResolvedValue({
+      id: 'job-12', clientId: 'acme', type: 'content', status: 'complete',
+      input: {}, output: { content: 'Blog post.' },
+      iteration: 1, maxIterations: 3,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } as any);
+    vi.mocked(stateStore.createJob).mockResolvedValue({} as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/repurpose',
+        subcommand: 'job-12',
+        args: ['from', 'blog', 'to', 'twitter', 'thread'],
+        flags: {},
+        rawInput: '/repurpose job-12 from blog to twitter thread',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleRepurpose(ctx);
+
+    expect(result.session.conversationMessages.length).toBe(2);
+    expect(result.session.conversationMessages[0].role).toBe('user');
+    expect(result.session.conversationMessages[1].role).toBe('assistant');
+    expect(result.session.conversationMessages[1].content).toBe('LLM response content');
+  });
+
+  it('should continue conversation on follow-up and update pending job', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+    vi.mocked(stateStore.updateJob).mockResolvedValue({} as any);
+
+    const ctx = mockCtx({
+      session: createSession({
+        activeClientId: 'acme',
+        lastHandler: '/repurpose',
+        pendingApproval: 'repurpose-job-12-123',
+        conversationMessages: [
+          { role: 'user', content: 'Repurpose the following blog content into a twitter thread:\n\nBlog post.' },
+          { role: 'assistant', content: 'Here is your twitter thread.' },
+        ],
+      }),
+      parsed: { command: '/approve', subcommand: '', args: [], flags: {}, rawInput: 'make it more casual', isNLP: true } as ParsedCommand,
+    });
+
+    const result = await handleRepurpose(ctx);
+
+    expect(result.session.conversationMessages.length).toBe(4);
+    expect(result.session.pendingApproval).toBe('repurpose-job-12-123');
+
+    // Verify pending job output was updated
+    expect(stateStore.updateJob).toHaveBeenCalledWith('repurpose-job-12-123', {
+      output: { content: 'LLM response content' },
+    });
+
+    const createCall = mockCreate.mock.calls[0];
+    const messages = createCall[0].messages;
+    expect(messages.length).toBe(3);
+    expect(messages[2].content).toBe('make it more casual');
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    expect(calls.some((msg: string) => msg.includes('Follow-up'))).toBe(true);
   });
 });
 
 describe('handleTrending', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   });
 
-  it('should output trending info message', async () => {
+  it('should require a client', async () => {
     const ctx = mockCtx({
+      parsed: {
+        command: '/trending',
+        subcommand: '',
+        args: [],
+        flags: {},
+        rawInput: '/trending',
+        isNLP: false,
+      } as ParsedCommand,
+      rl: mockRL(['']),
+    });
+
+    const result = await handleTrending(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('client') && msg.toLowerCase().includes('required'))).toBe(true);
+  });
+
+  it('should call LLM and show trending output', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
       parsed: {
         command: '/trending',
         subcommand: '',
@@ -174,33 +387,16 @@ describe('handleTrending', () => {
     const result = await handleTrending(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('trending'))).toBe(true);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('not yet implemented'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('LLM response content'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('Ready for next command'))).toBe(true);
     expect(result.session.lastHandler).toBe('/trending');
   });
 
-  it('should show filter when a topic is provided via parsed.topic', async () => {
+  it('should extract topic from subcommand', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+
     const ctx = mockCtx({
-      parsed: {
-        command: '/trending',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/trending AI marketing',
-        isNLP: false,
-        topic: 'AI marketing',
-      } as ParsedCommand,
-    });
-
-    const result = await handleTrending(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('AI marketing'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/trending');
-  });
-
-  it('should show filter when a topic is provided via subcommand', async () => {
-    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
       parsed: {
         command: '/trending',
         subcommand: 'fintech',
@@ -211,15 +407,18 @@ describe('handleTrending', () => {
       } as ParsedCommand,
     });
 
-    const result = await handleTrending(ctx);
+    await handleTrending(ctx);
 
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('fintech'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/trending');
+    const createCall = mockCreate.mock.calls[0];
+    const userMsg = createCall[0].messages[createCall[0].messages.length - 1].content;
+    expect(userMsg).toContain('fintech');
   });
 
-  it('should mention social platforms and news sources in not-implemented message', async () => {
+  it('should store conversation messages in session', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+
     const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
       parsed: {
         command: '/trending',
         subcommand: '',
@@ -230,46 +429,39 @@ describe('handleTrending', () => {
       } as ParsedCommand,
     });
 
-    await handleTrending(ctx);
+    const result = await handleTrending(ctx);
 
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('social platforms') || msg.toLowerCase().includes('news sources'))).toBe(true);
+    expect(result.session.conversationMessages.length).toBe(2);
+    expect(result.session.conversationMessages[0].role).toBe('user');
+    expect(result.session.conversationMessages[1].role).toBe('assistant');
+    expect(result.session.conversationMessages[1].content).toBe('LLM response content');
   });
 
-  it('should not show filter line when no topic is given', async () => {
+  it('should continue conversation on follow-up', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue(acmeProfile);
+
     const ctx = mockCtx({
-      parsed: {
-        command: '/trending',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/trending',
-        isNLP: false,
-      } as ParsedCommand,
-    });
-
-    await handleTrending(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.every((msg: string) => !msg.includes('Filter:'))).toBe(true);
-  });
-
-  it('should extract topic from rawInput when topic and subcommand are not set', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/trending',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/trending content marketing',
-        isNLP: false,
-      } as ParsedCommand,
+      session: createSession({
+        activeClientId: 'acme',
+        lastHandler: '/trending',
+        conversationMessages: [
+          { role: 'user', content: 'Analyze trending topics in SaaS' },
+          { role: 'assistant', content: 'Here are the top trends.' },
+        ],
+      }),
+      parsed: { command: '/approve', subcommand: '', args: [], flags: {}, rawInput: 'elaborate on trend 3', isNLP: true } as ParsedCommand,
     });
 
     const result = await handleTrending(ctx);
 
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('content marketing'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/trending');
+    expect(result.session.conversationMessages.length).toBe(4);
+
+    const createCall = mockCreate.mock.calls[0];
+    const messages = createCall[0].messages;
+    expect(messages.length).toBe(3);
+    expect(messages[2].content).toBe('elaborate on trend 3');
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    expect(calls.some((msg: string) => msg.includes('Follow-up'))).toBe(true);
   });
 });

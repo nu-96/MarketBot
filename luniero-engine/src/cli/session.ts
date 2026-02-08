@@ -1,12 +1,17 @@
+export interface ConversationMessage {
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
 export interface Session {
   readonly activeClientId: string | null;
   readonly lastCommand: string | null;
   readonly lastJobId: string | null;
   readonly lastHandler: string | null;
   readonly pendingApproval: string | null;
+  readonly conversationMessages: ReadonlyArray<ConversationMessage>;
   readonly history: ReadonlyArray<string>;
   readonly startedAt: string;
-  readonly debug: boolean;
 }
 
 export function createSession(overrides?: Partial<Session>): Session {
@@ -16,9 +21,9 @@ export function createSession(overrides?: Partial<Session>): Session {
     lastJobId: null,
     lastHandler: null,
     pendingApproval: null,
+    conversationMessages: [],
     history: [],
     startedAt: new Date().toISOString(),
-    debug: false,
     ...overrides,
   };
 }
@@ -41,13 +46,19 @@ export function withLastJob(session: Session, jobId: string | null): Session {
 }
 
 export function withLastHandler(session: Session, handler: string | null): Session {
-  return updateSession(session, { lastHandler: handler });
+  const updates: Partial<Session> = { lastHandler: handler };
+  // Clear conversation when switching to a different handler
+  if (handler !== session.lastHandler) {
+    updates.conversationMessages = [];
+  }
+  return updateSession(session, updates);
 }
 
 export function withPendingApproval(session: Session, jobId: string | null): Session {
   return updateSession(session, { pendingApproval: jobId });
 }
 
-export function withDebug(session: Session, debug: boolean): Session {
-  return updateSession(session, { debug });
+export function withConversation(session: Session, messages: ConversationMessage[]): Session {
+  return updateSession(session, { conversationMessages: messages });
 }
+

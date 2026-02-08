@@ -7,6 +7,8 @@ import {
   ALIASES,
   VALID_COMMANDS,
   _tokenize,
+  registerCommand,
+  unregisterCommand,
 } from '../../src/cli/parser';
 
 describe('parser', () => {
@@ -39,7 +41,6 @@ describe('parser', () => {
       expect(parse('/?').command).toBe('/help');
       expect(parse('/c list').command).toBe('/client');
       expect(parse('/s').command).toBe('/status');
-      expect(parse('/d status').command).toBe('/debug');
     });
 
     it('should resolve spec-defined aliases for /write', () => {
@@ -180,6 +181,37 @@ describe('parser', () => {
       const result = parse('write a post about AI --platform=twitter');
       expect(result.flags.platform).toBe('twitter');
     });
+
+    it('should parse bare word commands with subcommands', () => {
+      const result = parse('client pillars add "AI automation"');
+      expect(result.command).toBe('/client');
+      expect(result.subcommand).toBe('pillars');
+      expect(result.args).toContain('add');
+      expect(result.args).toContain('AI automation');
+      expect(result.isNLP).toBe(true);
+    });
+
+    it('should parse bare word client switch', () => {
+      const result = parse('client switch acme');
+      expect(result.command).toBe('/client');
+      expect(result.subcommand).toBe('switch');
+      expect(result.args).toEqual(['acme']);
+      expect(result.isNLP).toBe(true);
+    });
+
+    it('should parse bare word help with topic', () => {
+      const result = parse('help write');
+      expect(result.command).toBe('/help');
+      expect(result.subcommand).toBe('write');
+      expect(result.isNLP).toBe(true);
+    });
+
+    it('should parse bare word upload with path', () => {
+      const result = parse('upload report.pdf');
+      expect(result.command).toBe('/upload');
+      expect(result.subcommand).toBe('report.pdf');
+      expect(result.isNLP).toBe(true);
+    });
   });
 
   describe('parse - empty/whitespace', () => {
@@ -216,7 +248,6 @@ describe('parser', () => {
     it('should return true for valid commands', () => {
       expect(isValidCommand('/write')).toBe(true);
       expect(isValidCommand('/help')).toBe(true);
-      expect(isValidCommand('/debug')).toBe(true);
       expect(isValidCommand('/client')).toBe(true);
     });
 
@@ -298,6 +329,27 @@ describe('parser', () => {
       for (const [alias, command] of Object.entries(ALIASES)) {
         expect(VALID_COMMANDS.has(command), `${alias} -> ${command} should be valid`).toBe(true);
       }
+    });
+  });
+
+  describe('registerCommand / unregisterCommand', () => {
+    it('should register a new command', () => {
+      expect(isValidCommand('/my-custom')).toBe(false);
+      registerCommand('/my-custom');
+      expect(isValidCommand('/my-custom')).toBe(true);
+      // Cleanup
+      unregisterCommand('/my-custom');
+    });
+
+    it('should unregister a command', () => {
+      registerCommand('/temp-cmd');
+      expect(isValidCommand('/temp-cmd')).toBe(true);
+      unregisterCommand('/temp-cmd');
+      expect(isValidCommand('/temp-cmd')).toBe(false);
+    });
+
+    it('should include /command as a valid command', () => {
+      expect(isValidCommand('/command')).toBe(true);
     });
   });
 });

@@ -28,21 +28,27 @@ vi.mock('../../../src/memory/client-store', () => ({
     saveProfile: vi.fn().mockResolvedValue(undefined),
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
+    searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
   },
 }));
 
+const { mockCreate } = vi.hoisted(() => {
+  const mockCreate = vi.fn().mockResolvedValue({
+    content: [{ type: 'text', text: 'Research findings here' }],
+  });
+  return { mockCreate };
+});
+
 vi.mock('@anthropic-ai/sdk', () => {
   const MockAnthropic = vi.fn(function (this: any) {
-    this.messages = {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: 'Research findings here' }],
-      }),
-    };
+    this.messages = { create: mockCreate };
   });
   return { default: MockAnthropic };
 });
 
 import { handleResearch } from '../../../src/cli/handlers/research';
+import { clientStore } from '../../../src/memory/client-store';
 
 function mockRL(answers: string[] = []) {
   let i = 0;
@@ -64,6 +70,7 @@ function mockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
 describe('handleResearch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   });
 
   it('should require a client', async () => {
@@ -107,5 +114,84 @@ describe('handleResearch', () => {
 
     const result = await handleResearch(ctx);
     expect(result.session.lastHandler).toBe('/research');
+  });
+
+  it('should store conversation messages in session', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue({
+      id: 'acme', name: 'Acme', industry: 'SaaS',
+      description: '', goals: [], platforms: [], contacts: [], preferences: {},
+    });
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: { command: '/research', subcommand: '', args: [], flags: {}, rawInput: '/research AI trends', topic: 'AI trends', isNLP: false } as ParsedCommand,
+    });
+
+    const result = await handleResearch(ctx);
+
+    expect(result.session.conversationMessages.length).toBe(2);
+    expect(result.session.conversationMessages[0].role).toBe('user');
+    expect(result.session.conversationMessages[1].role).toBe('assistant');
+    expect(result.session.conversationMessages[1].content).toBe('Research findings here');
+  });
+
+  it('should continue conversation on follow-up', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue({
+      id: 'acme', name: 'Acme', industry: 'SaaS',
+      description: '', goals: [], platforms: [], contacts: [], preferences: {},
+    });
+
+    const ctx = mockCtx({
+      session: createSession({
+        activeClientId: 'acme',
+        lastHandler: '/research',
+        conversationMessages: [
+          { role: 'user', content: 'Research: AI trends' },
+          { role: 'assistant', content: 'Here are the AI trends.' },
+        ],
+      }),
+      parsed: { command: '/approve', subcommand: '', args: [], flags: {}, rawInput: 'tell me more about point 2', isNLP: true } as ParsedCommand,
+    });
+
+    const result = await handleResearch(ctx);
+
+    // Should have 4 messages: original 2 + follow-up user + follow-up assistant
+    expect(result.session.conversationMessages.length).toBe(4);
+
+    // Verify LLM received full conversation history
+    const createCall = mockCreate.mock.calls[0];
+    const messages = createCall[0].messages;
+    expect(messages.length).toBe(3); // 2 existing + 1 new user message
+    expect(messages[0].content).toBe('Research: AI trends');
+    expect(messages[1].content).toBe('Here are the AI trends.');
+    expect(messages[2].content).toBe('tell me more about point 2');
+
+    // Should label as follow-up
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    expect(calls.some((msg: string) => msg.includes('Follow-up'))).toBe(true);
+  });
+
+  it('should include brand voice in system prompt', async () => {
+    vi.mocked(clientStore.getProfile).mockResolvedValue({
+      id: 'acme', name: 'Acme', industry: 'SaaS',
+      description: '', goals: [], platforms: [], contacts: [], preferences: {},
+    });
+    vi.mocked(clientStore.getBrandVoice).mockResolvedValue({
+      tone: 'professional', avoid: ['slang'], examples: [], vocabulary: ['innovation'],
+    });
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: { command: '/research', subcommand: '', args: [], flags: {}, rawInput: '/research AI trends', topic: 'AI trends', isNLP: false } as ParsedCommand,
+    });
+
+    await handleResearch(ctx);
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining('professional'),
+      }),
+      expect.anything(),
+    );
   });
 });

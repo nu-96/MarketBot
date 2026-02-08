@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   colors,
   formatStatus,
@@ -15,9 +15,10 @@ import {
   formatIssue,
   formatPipelineProgress,
   formatHelp,
-  formatDebugInfo,
   formatClientInfo,
   formatPrompt,
+  formatTaskComplete,
+  withSpinner,
 } from '../../src/cli/formatter';
 import { Job } from '../../src/core/state-store';
 
@@ -149,8 +150,8 @@ describe('formatter', () => {
       input: { topic: 'AI trends' },
       iteration: 0,
       maxIterations: 3,
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
     };
 
     it('should include job ID', () => {
@@ -179,7 +180,7 @@ describe('formatter', () => {
     });
 
     it('should show completedAt when present', () => {
-      const job = { ...baseJob, completedAt: '2024-01-02T00:00:00Z' };
+      const job = { ...baseJob, completedAt: '2026-01-02T00:00:00Z' };
       expect(formatJobSummary(job)).toContain('Done:');
     });
 
@@ -209,8 +210,8 @@ describe('formatter', () => {
           input: { topic: 'AI' },
           iteration: 1,
           maxIterations: 3,
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-01T00:00:00Z',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
         },
       ];
       const result = formatJobTable(jobs);
@@ -229,8 +230,8 @@ describe('formatter', () => {
           input: { topic: 'A very long topic about the future of artificial intelligence and machine learning trends' },
           iteration: 0,
           maxIterations: 3,
-          createdAt: '2024-01-01T00:00:00Z',
-          updatedAt: '2024-01-01T00:00:00Z',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
         },
       ];
       const result = formatJobTable(jobs);
@@ -298,21 +299,6 @@ describe('formatter', () => {
     });
   });
 
-  describe('formatDebugInfo', () => {
-    it('should display key-value pairs', () => {
-      const result = formatDebugInfo({ status: 'ok', uptime: 123 });
-      expect(result).toContain('status:');
-      expect(result).toContain('ok');
-      expect(result).toContain('uptime:');
-      expect(result).toContain('123');
-    });
-
-    it('should handle object values', () => {
-      const result = formatDebugInfo({ config: { a: 1 } });
-      expect(result).toContain('config:');
-    });
-  });
-
   describe('formatClientInfo', () => {
     it('should display client info', () => {
       const result = formatClientInfo({
@@ -355,9 +341,9 @@ describe('formatter', () => {
       expect(result).toContain('>');
     });
 
-    it('should show "no-client" when null', () => {
+    it('should show "base" when null', () => {
       const result = formatPrompt(null);
-      expect(result).toContain('no-client');
+      expect(result).toContain('base');
     });
   });
 
@@ -470,6 +456,56 @@ describe('formatter', () => {
       ]);
       expect(result).toContain('├─');
       expect(result).toContain('└─');
+    });
+  });
+
+  describe('formatTaskComplete', () => {
+    it('should include Ready for next command', () => {
+      const result = formatTaskComplete();
+      expect(result).toContain('Ready for next command');
+    });
+  });
+
+  describe('withSpinner', () => {
+    beforeEach(() => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should return the result of the async function', async () => {
+      const result = await withSpinner('Loading...', async () => {
+        return 'hello';
+      });
+      expect(result).toBe('hello');
+    });
+
+    it('should rethrow errors from the async function', async () => {
+      await expect(
+        withSpinner('Loading...', async () => {
+          throw new Error('test error');
+        }),
+      ).rejects.toThrow('test error');
+    });
+
+    it('should stop the spinner after success', async () => {
+      await withSpinner('Loading...', async () => 'done');
+      // stdout.write should have been called (spinner start + stop)
+      expect(process.stdout.write).toHaveBeenCalled();
+    });
+
+    it('should stop the spinner after error', async () => {
+      try {
+        await withSpinner('Loading...', async () => {
+          throw new Error('fail');
+        });
+      } catch {
+        // expected
+      }
+      // stdout.write should have been called (spinner start + stop)
+      expect(process.stdout.write).toHaveBeenCalled();
     });
   });
 });

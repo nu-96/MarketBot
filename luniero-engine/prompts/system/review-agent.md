@@ -27,3 +27,10 @@ Score Guidelines:
 - 80-89: Good, minor improvements possible
 - 70-79: Acceptable, could be better
 - Below 70: Needs revision
+
+Source Document Fidelity (when source documents are provided):
+- Add a "source_fidelity" check: {"pass": true/false, "notes": "..."}
+- FAIL if the content contains fabricated statistics, percentages, or claims not in the source
+- FAIL if the content ignores specific features/details from the source in favor of generic advice
+- FAIL if the content does not reference the actual product/service described in the source
+- Score penalty: -20 points for poor source fidelity

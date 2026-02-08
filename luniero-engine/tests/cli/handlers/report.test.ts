@@ -96,8 +96,8 @@ describe('handleReport', () => {
         input: { topic: 'AI' },
         iteration: 2,
         maxIterations: 3,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:00Z',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
       },
       {
         id: 'j2',
@@ -107,8 +107,8 @@ describe('handleReport', () => {
         input: { topic: 'Cloud' },
         iteration: 0,
         maxIterations: 3,
-        createdAt: '2024-01-02T00:00:00Z',
-        updatedAt: '2024-01-02T00:00:00Z',
+        createdAt: '2026-01-02T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
         error: 'timeout',
       },
       {
@@ -119,8 +119,8 @@ describe('handleReport', () => {
         input: { topic: 'ML' },
         iteration: 1,
         maxIterations: 3,
-        createdAt: '2024-01-03T00:00:00Z',
-        updatedAt: '2024-01-03T00:00:00Z',
+        createdAt: '2026-01-03T00:00:00Z',
+        updatedAt: '2026-01-03T00:00:00Z',
       },
     ]);
 

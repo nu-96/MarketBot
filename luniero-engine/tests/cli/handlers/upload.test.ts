@@ -4,6 +4,15 @@ import { HandlerContext } from '../../../src/cli/router';
 import { createSession } from '../../../src/cli/session';
 import { ParsedCommand } from '../../../src/cli/parser';
 
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    existsSync: vi.fn().mockReturnValue(true),
+    readFileSync: vi.fn().mockReturnValue('This is sample text from a file. It has multiple sentences. Here is more content for testing.'),
+  };
+});
+
 vi.mock('../../../src/core/state-store', () => ({
   stateStore: {
     getJob: vi.fn(),
@@ -28,10 +37,16 @@ vi.mock('../../../src/memory/client-store', () => ({
     saveProfile: vi.fn().mockResolvedValue(undefined),
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
+    searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
+    storeClientContext: vi.fn().mockResolvedValue(undefined),
+    getVectorStats: vi.fn().mockResolvedValue({ totalVectors: 0, documents: [] }),
   },
 }));
 
 import { handleUpload, handleUploads } from '../../../src/cli/handlers/upload';
+import { existsSync, readFileSync } from 'fs';
+import { clientStore } from '../../../src/memory/client-store';
 
 function mockRL(answers: string[] = []) {
   let i = 0;
@@ -53,48 +68,11 @@ function mockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
 describe('handleUpload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('This is sample text from a file. It has multiple sentences. Here is more content for testing.');
   });
 
-  it('should accept a file path from subcommand and show upload info', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/upload',
-        subcommand: 'report.pdf',
-        args: [],
-        flags: {},
-        rawInput: '/upload report.pdf',
-        isNLP: false,
-      } as ParsedCommand,
-    });
-
-    const result = await handleUpload(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('report.pdf'))).toBe(true);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('upload'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/upload');
-  });
-
-  it('should accept a file path from args[0]', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/upload',
-        subcommand: '',
-        args: ['data.csv'],
-        flags: {},
-        rawInput: '/upload data.csv',
-        isNLP: false,
-      } as ParsedCommand,
-    });
-
-    const result = await handleUpload(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('data.csv'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/upload');
-  });
-
-  it('should prompt for file path when not provided and show error when empty', async () => {
+  it('should require a file path', async () => {
     const ctx = mockCtx({
       parsed: {
         command: '/upload',
@@ -112,31 +90,10 @@ describe('handleUpload', () => {
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
     expect(calls.some((msg: string) => msg.toLowerCase().includes('file path is required'))).toBe(true);
     expect(calls.some((msg: string) => msg.includes('Usage:'))).toBe(true);
-    // Session should not have lastHandler set to /upload since it errored without it
     expect(result.session.lastHandler).toBeNull();
   });
 
-  it('should prompt for file path and accept the prompted value', async () => {
-    const ctx = mockCtx({
-      parsed: {
-        command: '/upload',
-        subcommand: '',
-        args: [],
-        flags: {},
-        rawInput: '/upload',
-        isNLP: false,
-      } as ParsedCommand,
-      rl: mockRL(['my-file.docx']),
-    });
-
-    const result = await handleUpload(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.includes('my-file.docx'))).toBe(true);
-    expect(result.session.lastHandler).toBe('/upload');
-  });
-
-  it('should mention not yet implemented', async () => {
+  it('should require an active client', async () => {
     const ctx = mockCtx({
       parsed: {
         command: '/upload',
@@ -148,10 +105,214 @@ describe('handleUpload', () => {
       } as ParsedCommand,
     });
 
-    await handleUpload(ctx);
+    const result = await handleUpload(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('not yet implemented'))).toBe(true);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('no active client'))).toBe(true);
+  });
+
+  it('should error when file does not exist', async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'nonexistent.txt',
+        args: [],
+        flags: {},
+        rawInput: '/upload nonexistent.txt',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleUpload(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('file not found'))).toBe(true);
+    expect(result.session.lastHandler).toBe('/upload');
+  });
+
+  it('should extract text from a text file and store chunks in client memory', async () => {
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'report.txt',
+        args: [],
+        flags: {},
+        rawInput: '/upload report.txt',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleUpload(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('uploaded'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('report.txt'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('chunk'))).toBe(true);
+    expect(clientStore.storeClientContext).toHaveBeenCalled();
+    expect(result.session.lastHandler).toBe('/upload');
+  });
+
+  it('should store chunks with correct metadata', async () => {
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'data.csv',
+        args: [],
+        flags: { type: 'research' },
+        rawInput: '/upload data.csv --type=research',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleUpload(ctx);
+
+    expect(clientStore.storeClientContext).toHaveBeenCalledWith('acme', expect.objectContaining({
+      type: 'content',
+      metadata: expect.objectContaining({
+        source: 'file_upload',
+        fileName: 'data.csv',
+        docType: 'research',
+      }),
+    }));
+  });
+
+  it('should accept file path from args[0]', async () => {
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: '',
+        args: ['notes.md'],
+        flags: {},
+        rawInput: '/upload notes.md',
+        isNLP: false,
+      } as ParsedCommand,
+      rl: mockRL(['notes.md']),
+    });
+
+    const result = await handleUpload(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.includes('notes.md'))).toBe(true);
+    expect(result.session.lastHandler).toBe('/upload');
+  });
+
+  it('should use --client flag for client ID', async () => {
+    const ctx = mockCtx({
+      parsed: {
+        command: '/upload',
+        subcommand: 'brief.txt',
+        args: [],
+        flags: { client: 'beta-corp' },
+        rawInput: '/upload brief.txt --client=beta-corp',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleUpload(ctx);
+
+    expect(clientStore.storeClientContext).toHaveBeenCalledWith('beta-corp', expect.anything());
+  });
+
+  it('should error on empty file', async () => {
+    vi.mocked(readFileSync).mockReturnValue('');
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'empty.txt',
+        args: [],
+        flags: {},
+        rawInput: '/upload empty.txt',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleUpload(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('empty'))).toBe(true);
+    expect(result.session.lastHandler).toBe('/upload');
+  });
+
+  it('should handle unsupported file types', async () => {
+    vi.mocked(readFileSync).mockImplementation(() => { throw new Error('Unsupported file type: .exe'); });
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'malware.exe',
+        args: [],
+        flags: {},
+        rawInput: '/upload malware.exe',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    const result = await handleUpload(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('failed') || msg.toLowerCase().includes('unsupported'))).toBe(true);
+  });
+
+  it('should display vector space stats after successful upload', async () => {
+    vi.mocked(clientStore.getVectorStats).mockResolvedValue({
+      totalVectors: 24,
+      documents: [
+        { fileName: 'report.txt', chunks: 1, docType: 'general' },
+        { fileName: 'brand-guidelines.pdf', chunks: 8, docType: 'voice' },
+      ],
+    });
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'report.txt',
+        args: [],
+        flags: {},
+        rawInput: '/upload report.txt',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleUpload(ctx);
+
+    expect(clientStore.getVectorStats).toHaveBeenCalledWith('acme');
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(calls.some((msg: string) => msg.includes('Vector Space'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('report.txt'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('brand-guidelines.pdf'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('Total vectors: 24'))).toBe(true);
+  });
+
+  it('should default docType to general when --type not provided', async () => {
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+      parsed: {
+        command: '/upload',
+        subcommand: 'doc.txt',
+        args: [],
+        flags: {},
+        rawInput: '/upload doc.txt',
+        isNLP: false,
+      } as ParsedCommand,
+    });
+
+    await handleUpload(ctx);
+
+    expect(clientStore.storeClientContext).toHaveBeenCalledWith('acme', expect.objectContaining({
+      metadata: expect.objectContaining({
+        docType: 'general',
+      }),
+    }));
   });
 });
 
@@ -235,7 +396,6 @@ describe('handleUploads', () => {
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0] as string);
     expect(calls.some((msg: string) => msg.toLowerCase().includes('file id is required'))).toBe(true);
-    // Should not set lastHandler since it returned early with error
     expect(result.session.lastHandler).toBeNull();
   });
 

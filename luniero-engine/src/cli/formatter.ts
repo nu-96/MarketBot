@@ -1,4 +1,5 @@
 import { Job, JobStatus } from '../core/state-store';
+import { createPulseSpinner, PulseSpinner } from './utils/streaming';
 
 // ANSI color codes
 const RESET = '\x1b[0m';
@@ -44,6 +45,7 @@ const STATUS_COLORS: Record<JobStatus, (s: string) => string> = {
   reviewing: colors.yellow,
   revision: colors.yellow,
   human_review: colors.yellow,
+  scheduled: colors.magenta,
   complete: colors.green,
   failed: colors.red,
 };
@@ -60,7 +62,7 @@ export function formatWelcome(version: string): string {
     colors.dim(`  v${version} — Interactive CLI`),
     '',
     colors.dim('  Type /help for commands or just describe what you need.'),
-    colors.dim('  Press Ctrl+C to exit.'),
+    colors.dim('  Press TAB to autocomplete commands. Press Ctrl+C to exit.'),
     '',
   ].join('\n');
 }
@@ -104,6 +106,9 @@ export function formatJobSummary(job: Job): string {
   if (job.iteration > 0) {
     lines.push(`  ${colors.bold('Iter:')}   ${job.iteration}/${job.maxIterations}`);
   }
+  if (job.status === 'scheduled' && job.output?.scheduledAt) {
+    lines.push(`  ${colors.bold(colors.magenta('Sched:'))} ${job.output.scheduledAt}`);
+  }
   if (job.completedAt) {
     lines.push(`  ${colors.bold('Done:')}   ${new Date(job.completedAt).toLocaleString()}`);
   }
@@ -111,6 +116,25 @@ export function formatJobSummary(job: Job): string {
     lines.push(`  ${colors.bold(colors.red('Error:'))} ${job.error}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Build a plain-text summary of client task status for LLM context.
+ * Returns empty string if no active jobs exist.
+ */
+export function buildTaskStatusContext(jobs: Job[]): string {
+  if (jobs.length === 0) return '';
+
+  const lines = jobs.map(job => {
+    const topic = job.input?.topic || 'N/A';
+    const base = `- [${job.id}] ${job.type} "${topic}" — ${job.status}`;
+    if (job.status === 'scheduled' && job.output?.scheduledAt) {
+      return `${base} (scheduled for ${job.output.scheduledAt})`;
+    }
+    return base;
+  });
+
+  return `\nClient Task Status:\n${lines.join('\n')}`;
 }
 
 export function formatJobTable(jobs: Job[]): string {
@@ -206,7 +230,7 @@ export function formatPipelineProgress(stages: { name: string; status: 'done' | 
         lines.push(`${prefix} ${colors.green('✓')} ${s.name}${timeStr}`);
         break;
       case 'active':
-        lines.push(`${prefix} ${colors.cyan('●')} ${s.name}...`);
+        lines.push(`${prefix} ${colors.cyan('●')} ${s.name}`);
         break;
       case 'failed':
         lines.push(`${prefix} ${colors.red('✗')} ${s.name}${timeStr}`);
@@ -256,14 +280,6 @@ export function formatHelp(commands: { command: string; aliases: string[]; descr
   return lines.join('\n');
 }
 
-export function formatDebugInfo(data: Record<string, unknown>): string {
-  const lines = [colors.bold(colors.yellow('  Debug Info'))];
-  for (const [key, value] of Object.entries(data)) {
-    lines.push(`  ${colors.bold(key + ':')} ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
-  }
-  return lines.join('\n');
-}
-
 export function formatClientInfo(profile: { id: string; name: string; industry: string; platforms?: any[]; preferences?: any }): string {
   const lines = [
     colors.bold(colors.cyan(`  Client: ${profile.name}`)),
@@ -279,9 +295,58 @@ export function formatClientInfo(profile: { id: string; name: string; industry: 
   return lines.join('\n');
 }
 
+export interface ClientTableRow {
+  id: string;
+  name: string;
+  industry: string;
+  platforms: string[];
+  jobCount: number;
+  lastActivity: string | null;
+  isActive: boolean;
+}
+
+export function formatClientTable(clients: ClientTableRow[]): string {
+  if (clients.length === 0) {
+    return colors.dim('  No clients found.');
+  }
+
+  const header = `  ${pad('ID', 18)} ${pad('Name', 20)} ${pad('Industry', 16)} ${pad('Platforms', 18)} ${pad('Jobs', 6)} ${pad('Last Active', 14)}`;
+  const separator = colors.dim('  ' + '─'.repeat(96));
+
+  const rows = clients.map(c => {
+    const id = c.isActive ? colors.green(pad(c.id, 18)) : colors.cyan(pad(c.id, 18));
+    const name = pad(c.name.substring(0, 18), 20);
+    const industry = pad(c.industry.substring(0, 14), 16);
+    const platforms = colors.dim(pad(c.platforms.slice(0, 3).join(', ').substring(0, 16) || '—', 18));
+    const jobs = pad(String(c.jobCount), 6);
+    const lastActive = c.lastActivity
+      ? colors.dim(pad(new Date(c.lastActivity).toLocaleDateString(), 14))
+      : colors.dim(pad('—', 14));
+    const marker = c.isActive ? colors.green(' ●') : '  ';
+    return `${marker}${id} ${name} ${industry} ${platforms} ${jobs} ${lastActive}`;
+  });
+
+  return ['', colors.bold(header), separator, ...rows, ''].join('\n');
+}
+
 export function formatTaskComplete(): string {
   return colors.dim('─'.repeat(50) + '\n Ready for next command\n' + '─'.repeat(50));
 }
+
+export async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
+  const spinner = createPulseSpinner(message);
+  spinner.start();
+  try {
+    const result = await fn();
+    spinner.stop();
+    return result;
+  } catch (err) {
+    spinner.stop();
+    throw err;
+  }
+}
+
+export { PulseSpinner, createPulseSpinner };
 
 function formatReviewStatus(status: string): string {
   switch (status) {
@@ -357,6 +422,6 @@ export function shortId(id: string): string {
 }
 
 export function formatPrompt(clientId: string | null): string {
-  const client = clientId ? colors.cyan(clientId) : colors.dim('no-client');
+  const client = clientId ? colors.cyan(clientId) : colors.dim('base');
   return `${client} ${colors.dim('>')} `;
 }

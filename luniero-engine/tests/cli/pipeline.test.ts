@@ -53,6 +53,7 @@ vi.mock('../../src/memory/client-store', () => ({
     getContentPillars: vi.fn().mockResolvedValue(['innovation', 'leadership']),
     getRecentFeedback: vi.fn().mockResolvedValue([]),
     searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
     storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -171,14 +172,14 @@ describe('runPipeline', () => {
 
     const result = await runPipeline('job-1', progress);
 
-    expect(result.status).toBe('complete');
+    // Pipeline always goes to human_review for approved content (requires human approval)
+    expect(result.status).toBe('human_review');
     expect(result.output).toBeDefined();
     expect(result.brief).toBeDefined();
     expect(result.draft).toBeDefined();
     expect(result.polishedDraft).toBeDefined();
     expect(result.review).toBeDefined();
     expect(result.review.score).toBe(92);
-    expect(result.completedAt).toBeDefined();
   });
 
   it('should fire progress callbacks at each stage', async () => {
@@ -195,7 +196,7 @@ describe('runPipeline', () => {
     expect(stages).toContain('drafting');
     expect(stages).toContain('polishing');
     expect(stages).toContain('reviewing');
-    expect(stages).toContain('complete');
+    expect(stages).toContain('human_review');
   });
 
   it('should load context in parallel from clientStore', async () => {
@@ -274,7 +275,7 @@ describe('runPipeline', () => {
 
     const result = await runPipeline('job-4', progress);
 
-    expect(result.status).toBe('complete');
+    expect(result.status).toBe('human_review');
     expect(stages).toContain('revision');
     // 1 brief + 2 draft + 2 polish + 2 review = 7 LLM calls
     expect(llmCallCount).toBe(7);
@@ -408,7 +409,75 @@ describe('runPipeline', () => {
     expect(statusUpdates).toContain('drafting');
     expect(statusUpdates).toContain('polishing');
     expect(statusUpdates).toContain('reviewing');
-    expect(statusUpdates).toContain('complete');
+    expect(statusUpdates).toContain('human_review');
+  });
+
+  it('should merge searchByFileName results into context when topic matches a document', async () => {
+    vi.mocked(clientStore.searchByFileName).mockResolvedValue([
+      { text: 'Q1 revenue grew 15%', type: 'content', score: 1.0, metadata: { source: 'file_upload', fileName: 'quarterly-report.pdf', chunkIndex: 0 } },
+      { text: 'New product launched in March', type: 'content', score: 1.0, metadata: { source: 'file_upload', fileName: 'quarterly-report.pdf', chunkIndex: 1 } },
+    ]);
+    vi.mocked(clientStore.searchClientContext).mockResolvedValue([
+      { text: 'Content pillar: innovation', type: 'preference', score: 0.8, metadata: { source: 'content_pillar' } },
+    ]);
+
+    await createTestJob('job-doc', {
+      input: { clientId: 'acme', type: 'social_post', topic: 'quarterly-report', platform: 'instagram' },
+    });
+
+    const progress: PipelineProgress = { onStage: vi.fn() };
+    const result = await runPipeline('job-doc', progress);
+
+    expect(clientStore.searchByFileName).toHaveBeenCalledWith('acme', 'quarterly-report');
+    // All 3 context items should be merged (2 document + 1 semantic)
+    expect(result.context.relevantHistory).toHaveLength(3);
+    // Document chunks should come first
+    expect(result.context.relevantHistory[0].text).toBe('Q1 revenue grew 15%');
+    expect(result.context.relevantHistory[1].text).toBe('New product launched in March');
+    expect(result.context.relevantHistory[2].text).toBe('Content pillar: innovation');
+  });
+
+  it('should deduplicate when semantic search returns same text as document search', async () => {
+    const sharedText = 'Q1 revenue grew 15%';
+    vi.mocked(clientStore.searchByFileName).mockResolvedValue([
+      { text: sharedText, type: 'content', score: 1.0, metadata: { source: 'file_upload', fileName: 'quarterly-report.pdf', chunkIndex: 0 } },
+    ]);
+    vi.mocked(clientStore.searchClientContext).mockResolvedValue([
+      { text: sharedText, type: 'content', score: 0.7, metadata: { source: 'file_upload', fileName: 'quarterly-report.pdf' } },
+      { text: 'Content pillar: innovation', type: 'preference', score: 0.5, metadata: { source: 'content_pillar' } },
+    ]);
+
+    await createTestJob('job-dedup', {
+      input: { clientId: 'acme', type: 'social_post', topic: 'quarterly-report', platform: 'linkedin' },
+    });
+
+    const progress: PipelineProgress = { onStage: vi.fn() };
+    const result = await runPipeline('job-dedup', progress);
+
+    // Should have 2 (no duplicate of shared text)
+    expect(result.context.relevantHistory).toHaveLength(2);
+    expect(result.context.relevantHistory[0].text).toBe(sharedText);
+    expect(result.context.relevantHistory[1].text).toBe('Content pillar: innovation');
+  });
+
+  it('should find document chunks when topic is a natural language phrase containing the filename', async () => {
+    vi.mocked(clientStore.searchByFileName).mockResolvedValue([
+      { text: 'Build Something People Love', type: 'content', score: 1.0, metadata: { source: 'file_upload', fileName: 'simple_marketing_page.pdf', chunkIndex: 0 } },
+      { text: 'Fast Setup, Smart Analytics, Secure', type: 'content', score: 1.0, metadata: { source: 'file_upload', fileName: 'simple_marketing_page.pdf', chunkIndex: 1 } },
+    ]);
+
+    await createTestJob('job-nlp', {
+      input: { clientId: 'acme', type: 'social_post', topic: 'an instagram post based off of simple_marketing_page', platform: 'instagram' },
+    });
+
+    const progress: PipelineProgress = { onStage: vi.fn() };
+    const result = await runPipeline('job-nlp', progress);
+
+    // searchByFileName should be called with the full NLP topic
+    expect(clientStore.searchByFileName).toHaveBeenCalledWith('acme', 'an instagram post based off of simple_marketing_page');
+    // Document chunks should be in context
+    expect(result.context.relevantHistory.length).toBeGreaterThanOrEqual(2);
+    expect(result.context.relevantHistory[0].text).toBe('Build Something People Love');
   });
 
   it('should handle needs_human_review status from review agent', async () => {

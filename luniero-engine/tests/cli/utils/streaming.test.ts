@@ -246,12 +246,13 @@ describe('formatPipelineTree', () => {
     expect(result).toContain('Fetching data');
   });
 
-  it('should display ellipsis when active stage has no detail', () => {
+  it('should display stage name without ellipsis when active stage has no detail', () => {
     const stages: PipelineStage[] = [
       { name: 'Loading', status: 'active' },
     ];
     const result = formatPipelineTree(stages);
-    expect(result).toContain('Loading...');
+    expect(result).toContain('● Loading');
+    expect(result).not.toContain('...');
   });
 
   it('should format failed state with detail', () => {
@@ -328,12 +329,12 @@ describe('getRotatingMessage', () => {
 
   it('should return fallback for an invalid/unknown stage', () => {
     const result = getRotatingMessage('nonexistent', 0);
-    expect(result).toBe('nonexistent...');
+    expect(result).toBe('nonexistent');
   });
 
   it('should return fallback for an empty string stage', () => {
     const result = getRotatingMessage('', 0);
-    expect(result).toBe('...');
+    expect(result).toBe('');
   });
 
   it('should work correctly for all known stages', () => {

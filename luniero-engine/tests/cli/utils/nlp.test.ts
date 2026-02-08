@@ -6,6 +6,16 @@ import {
   looksLikeWriteRequest,
   looksLikeQuickRequest,
   looksLikeResearchRequest,
+  looksLikeStatusRequest,
+  looksLikeHelpRequest,
+  looksLikeCalendarRequest,
+  looksLikeScheduleRequest,
+  looksLikeClientRequest,
+  looksLikeUploadRequest,
+  looksLikeReportRequest,
+  looksLikeExportRequest,
+  looksLikeRepurposeRequest,
+  looksLikeTrendingRequest,
 } from '../../../src/cli/utils/nlp';
 
 describe('nlp', () => {
@@ -180,6 +190,170 @@ describe('nlp', () => {
 
     it('should not match write requests', () => {
       expect(looksLikeResearchRequest('write about AI')).toBe(false);
+    });
+  });
+
+  describe('looksLikeStatusRequest', () => {
+    it('should detect "status"', () => {
+      expect(looksLikeStatusRequest('status')).toBe(true);
+    });
+
+    it('should detect "check status"', () => {
+      expect(looksLikeStatusRequest('check status')).toBe(true);
+    });
+
+    it('should detect "show jobs"', () => {
+      expect(looksLikeStatusRequest('show jobs')).toBe(true);
+    });
+
+    it('should detect "any updates"', () => {
+      expect(looksLikeStatusRequest('any updates')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeStatusRequest('write a post')).toBe(false);
+    });
+  });
+
+  describe('looksLikeHelpRequest', () => {
+    it('should detect "help"', () => {
+      expect(looksLikeHelpRequest('help')).toBe(true);
+    });
+
+    it('should detect "what can you do"', () => {
+      expect(looksLikeHelpRequest('what can you do')).toBe(true);
+    });
+
+    it('should detect "commands"', () => {
+      expect(looksLikeHelpRequest('commands')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeHelpRequest('write a blog')).toBe(false);
+    });
+  });
+
+  describe('looksLikeCalendarRequest', () => {
+    it('should detect "calendar"', () => {
+      expect(looksLikeCalendarRequest('calendar')).toBe(true);
+    });
+
+    it('should detect "show calendar"', () => {
+      expect(looksLikeCalendarRequest('show calendar')).toBe(true);
+    });
+
+    it('should detect "whats scheduled"', () => {
+      expect(looksLikeCalendarRequest('whats scheduled')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeCalendarRequest('write a post')).toBe(false);
+    });
+  });
+
+  describe('looksLikeScheduleRequest', () => {
+    it('should detect "schedule a post"', () => {
+      expect(looksLikeScheduleRequest('schedule a post')).toBe(true);
+    });
+
+    it('should detect "publish at 3pm"', () => {
+      expect(looksLikeScheduleRequest('publish at 3pm')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeScheduleRequest('write a blog')).toBe(false);
+    });
+  });
+
+  describe('looksLikeClientRequest', () => {
+    it('should detect "switch client"', () => {
+      expect(looksLikeClientRequest('switch client')).toBe(true);
+    });
+
+    it('should detect "new client"', () => {
+      expect(looksLikeClientRequest('new client')).toBe(true);
+    });
+
+    it('should detect "clients"', () => {
+      expect(looksLikeClientRequest('clients')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeClientRequest('write a blog')).toBe(false);
+    });
+  });
+
+  describe('looksLikeUploadRequest', () => {
+    it('should detect "upload a file"', () => {
+      expect(looksLikeUploadRequest('upload a file')).toBe(true);
+    });
+
+    it('should detect "import pdf"', () => {
+      expect(looksLikeUploadRequest('import a pdf')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeUploadRequest('write a post')).toBe(false);
+    });
+  });
+
+  describe('looksLikeReportRequest', () => {
+    it('should detect "report"', () => {
+      expect(looksLikeReportRequest('report')).toBe(true);
+    });
+
+    it('should detect "show analytics"', () => {
+      expect(looksLikeReportRequest('show analytics')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeReportRequest('write a blog')).toBe(false);
+    });
+  });
+
+  describe('looksLikeExportRequest', () => {
+    it('should detect "export"', () => {
+      expect(looksLikeExportRequest('export')).toBe(true);
+    });
+
+    it('should detect "save as markdown"', () => {
+      expect(looksLikeExportRequest('save as markdown')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeExportRequest('write a post')).toBe(false);
+    });
+  });
+
+  describe('looksLikeRepurposeRequest', () => {
+    it('should detect "repurpose"', () => {
+      expect(looksLikeRepurposeRequest('repurpose this content')).toBe(true);
+    });
+
+    it('should detect "convert into a blog"', () => {
+      expect(looksLikeRepurposeRequest('convert into a blog')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeRepurposeRequest('write a post')).toBe(false);
+    });
+  });
+
+  describe('looksLikeTrendingRequest', () => {
+    it('should detect "trending"', () => {
+      expect(looksLikeTrendingRequest('trending')).toBe(true);
+    });
+
+    it('should detect "whats trending"', () => {
+      expect(looksLikeTrendingRequest('whats trending')).toBe(true);
+    });
+
+    it('should detect "hot topics"', () => {
+      expect(looksLikeTrendingRequest('hot topics')).toBe(true);
+    });
+
+    it('should not match unrelated input', () => {
+      expect(looksLikeTrendingRequest('write a post')).toBe(false);
     });
   });
 });

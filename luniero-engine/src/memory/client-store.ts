@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const DB_TIMEOUT_MS = 10_000;
@@ -45,6 +45,28 @@ class ClientStore {
     }
   }
 
+  async getAllClients(): Promise<ClientProfile[]> {
+    const profiles: ClientProfile[] = [];
+
+    // Scan local directories
+    if (existsSync(this.localPath)) {
+      const dirs = readdirSync(this.localPath).filter(d => {
+        const profilePath = join(this.localPath, d, 'profile.json');
+        return existsSync(profilePath);
+      });
+      for (const dir of dirs) {
+        try {
+          const data = JSON.parse(readFileSync(join(this.localPath, dir, 'profile.json'), 'utf-8'));
+          profiles.push(data);
+        } catch {
+          // Skip corrupt profiles
+        }
+      }
+    }
+
+    return profiles;
+  }
+
   async getProfile(clientId: string): Promise<ClientProfile | null> {
     // Try local first (for development)
     const localPath = join(this.localPath, clientId, 'profile.json');
@@ -75,6 +97,17 @@ class ClientStore {
     if (!config.localMode && this.supabase) {
       await withTimeout(this.supabase.from('client_profiles').upsert(profile));
     }
+
+    // Auto-vectorize content pillars
+    if (profile.preferences?.contentPillars?.length) {
+      for (const pillar of profile.preferences.contentPillars) {
+        await this.storeClientContext(clientId, {
+          type: 'preference',
+          text: `Content pillar: ${pillar}`,
+          metadata: { source: 'content_pillar' },
+        });
+      }
+    }
   }
 
   async getBrandVoice(clientId: string): Promise<BrandVoice | null> {
@@ -90,6 +123,47 @@ class ClientStore {
     );
 
     return data;
+  }
+
+  async saveBrandVoice(clientId: string, voice: BrandVoice) {
+    const clientPath = join(this.localPath, clientId);
+    if (!existsSync(clientPath)) mkdirSync(clientPath, { recursive: true });
+    writeFileSync(join(clientPath, 'brand_voice.json'), JSON.stringify(voice, null, 2));
+
+    if (!config.localMode && this.supabase) {
+      await withTimeout(this.supabase.from('brand_voices').upsert({ client_id: clientId, ...voice }));
+    }
+
+    // Auto-vectorize tone and vocabulary
+    await this.storeClientContext(clientId, {
+      type: 'preference',
+      text: `Brand voice tone: ${voice.tone}. Vocabulary: ${voice.vocabulary.join(', ')}. Avoid: ${voice.avoid.join(', ')}.`,
+      metadata: { source: 'brand_voice' },
+    });
+  }
+
+  async saveContentPillars(clientId: string, pillars: string[]) {
+    const profile = await this.getProfile(clientId);
+    if (profile) {
+      profile.preferences = { ...profile.preferences, contentPillars: pillars };
+      // Save profile without re-vectorizing (we vectorize explicitly below)
+      const clientPath = join(this.localPath, clientId);
+      if (!existsSync(clientPath)) mkdirSync(clientPath, { recursive: true });
+      writeFileSync(join(clientPath, 'profile.json'), JSON.stringify(profile, null, 2));
+
+      if (!config.localMode && this.supabase) {
+        await withTimeout(this.supabase.from('client_profiles').upsert(profile));
+      }
+
+      // Vectorize each pillar
+      for (const pillar of pillars) {
+        await this.storeClientContext(clientId, {
+          type: 'preference',
+          text: `Content pillar: ${pillar}`,
+          metadata: { source: 'content_pillar' },
+        });
+      }
+    }
   }
 
   async getContentPillars(clientId: string): Promise<string[]> {
@@ -177,6 +251,96 @@ class ClientStore {
       existing.push({ ...context, embedding, createdAt: new Date().toISOString() });
       writeFileSync(vectorPath, JSON.stringify(existing, null, 2));
     }
+  }
+
+  private matchesFileName(storedFileName: string, query: string): boolean {
+    const normalizedStored = storedFileName.replace(/\.[^.]+$/, '').toLowerCase();
+    const normalizedQuery = query.replace(/\.[^.]+$/, '').toLowerCase();
+
+    // Exact match: query is just the filename
+    if (normalizedStored === normalizedQuery) return true;
+
+    // Contained match: the filename appears as a word boundary in the query
+    // Supports both hyphens and underscores as separators (and spaces)
+    const queryNormalized = normalizedQuery.replace(/[-_]/g, '[-_ ]');
+    const storedPattern = normalizedStored.replace(/[-_]/g, '[-_ ]');
+    const regex = new RegExp(`(?:^|\\s|\\b)${storedPattern}(?:\\s|\\b|$)`);
+    return regex.test(normalizedQuery);
+  }
+
+  async searchByFileName(clientId: string, fileName: string): Promise<Array<{
+    text: string; type: string; score: number; metadata?: Record<string, any>;
+  }>> {
+    if (!config.localMode && this.supabase) {
+      const { data } = await withTimeout(
+        this.supabase.from('client_context_vectors')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('metadata->>source', 'file_upload')
+      );
+      return (data || [])
+        .filter((v: any) => {
+          const storedName = v.metadata?.fileName || '';
+          return this.matchesFileName(storedName, fileName);
+        })
+        .sort((a: any, b: any) => (a.metadata?.chunkIndex ?? 0) - (b.metadata?.chunkIndex ?? 0))
+        .map((v: any) => ({ text: v.text, type: v.type, score: 1.0, metadata: v.metadata }));
+    }
+
+    const vectorPath = join(this.localPath, clientId, 'vectors.json');
+    if (!existsSync(vectorPath)) return [];
+    const vectors = JSON.parse(readFileSync(vectorPath, 'utf-8'));
+    return vectors
+      .filter((v: any) => {
+        const storedName = v.metadata?.fileName || '';
+        return this.matchesFileName(storedName, fileName);
+      })
+      .sort((a: any, b: any) => (a.metadata?.chunkIndex ?? 0) - (b.metadata?.chunkIndex ?? 0))
+      .map((v: any) => ({ text: v.text, type: v.type, score: 1.0, metadata: v.metadata }));
+  }
+
+  async getVectorStats(clientId: string): Promise<{
+    totalVectors: number;
+    documents: { fileName: string; chunks: number; docType: string }[];
+  }> {
+    let vectors: any[] = [];
+
+    if (!config.localMode && this.supabase) {
+      const { data } = await withTimeout(
+        this.supabase.from('client_context_vectors')
+          .select('*')
+          .eq('client_id', clientId)
+      );
+      vectors = data || [];
+    } else {
+      const vectorPath = join(this.localPath, clientId, 'vectors.json');
+      if (existsSync(vectorPath)) {
+        vectors = JSON.parse(readFileSync(vectorPath, 'utf-8'));
+      }
+    }
+
+    const totalVectors = vectors.length;
+    const docMap = new Map<string, { chunks: number; docType: string }>();
+
+    for (const v of vectors) {
+      if (v.metadata?.source === 'file_upload' && v.metadata?.fileName) {
+        const key = v.metadata.fileName;
+        const existing = docMap.get(key);
+        if (existing) {
+          existing.chunks++;
+        } else {
+          docMap.set(key, { chunks: 1, docType: v.metadata.docType || 'general' });
+        }
+      }
+    }
+
+    const documents = Array.from(docMap.entries()).map(([fileName, info]) => ({
+      fileName,
+      chunks: info.chunks,
+      docType: info.docType,
+    }));
+
+    return { totalVectors, documents };
   }
 
   async searchClientContext(clientId: string, query: string, limit = 5): Promise<Array<{

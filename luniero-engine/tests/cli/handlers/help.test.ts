@@ -4,7 +4,7 @@ import { HandlerContext } from '../../../src/cli/router';
 import { createSession } from '../../../src/cli/session';
 import { ParsedCommand } from '../../../src/cli/parser';
 
-import { handleHelp, handleSettings, getCommandList } from '../../../src/cli/handlers/help';
+import { handleHelp, getCommandList } from '../../../src/cli/handlers/help';
 
 function mockRL(answers: string[] = []) {
   let i = 0;
@@ -38,7 +38,6 @@ describe('handleHelp', () => {
     const allOutput = calls.join('\n');
     expect(allOutput).toContain('/write');
     expect(allOutput).toContain('/help');
-    expect(allOutput).toContain('/debug');
   });
 
   it('should include aliases in help', async () => {
@@ -75,21 +74,6 @@ describe('handleHelp', () => {
     expect(allOutput).toContain('--variations');
   });
 
-  it('should show command-specific help for /help debug', async () => {
-    const ctx = mockCtx({
-      parsed: { command: '/help', subcommand: 'debug', args: [], flags: {}, rawInput: '/help debug', isNLP: false } as ParsedCommand,
-    });
-
-    await handleHelp(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
-    const allOutput = calls.join('\n');
-    expect(allOutput).toContain('agents');
-    expect(allOutput).toContain('config');
-    expect(allOutput).toContain('--verbose');
-    expect(allOutput).toContain('--dry-run');
-  });
-
   it('should fall back to all commands for unknown topic', async () => {
     const ctx = mockCtx({
       parsed: { command: '/help', subcommand: 'unknown-cmd', args: [], flags: {}, rawInput: '/help unknown-cmd', isNLP: false } as ParsedCommand,
@@ -113,43 +97,3 @@ describe('getCommandList', () => {
   });
 });
 
-describe('handleSettings', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should show current settings', async () => {
-    const ctx = mockCtx({
-      parsed: { command: '/settings', subcommand: '', args: [], flags: {}, rawInput: '/settings', isNLP: false } as ParsedCommand,
-    });
-
-    await handleSettings(ctx);
-
-    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
-    const allOutput = calls.join('\n');
-    expect(allOutput).toContain('Settings');
-    expect(allOutput).toContain('Debug Mode');
-  });
-
-  it('should toggle debug mode on', async () => {
-    const ctx = mockCtx({
-      session: createSession({ debug: false }),
-      parsed: { command: '/settings', subcommand: 'debug', args: [], flags: {}, rawInput: '/settings debug', isNLP: false } as ParsedCommand,
-    });
-
-    const result = await handleSettings(ctx);
-
-    expect(result.session.debug).toBe(true);
-  });
-
-  it('should toggle debug mode off', async () => {
-    const ctx = mockCtx({
-      session: createSession({ debug: true }),
-      parsed: { command: '/settings', subcommand: 'debug', args: [], flags: {}, rawInput: '/settings debug', isNLP: false } as ParsedCommand,
-    });
-
-    const result = await handleSettings(ctx);
-
-    expect(result.session.debug).toBe(false);
-  });
-});

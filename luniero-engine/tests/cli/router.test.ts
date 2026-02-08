@@ -109,23 +109,88 @@ describe('CommandRouter', () => {
       expect(handler).toHaveBeenCalledOnce();
     });
 
-    it('should use lastHandler for conversational follow-up', async () => {
-      const writeHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
+    it('should use lastHandler for conversational follow-up when conversation exists', async () => {
+      const quickHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
         return { session: ctx.session };
       });
 
-      router.register('/write', writeHandler);
-      const session = withLastHandler(createSession(), '/write');
+      router.register('/quick', quickHandler);
+      const session = createSession({
+        lastHandler: '/quick',
+        conversationMessages: [
+          { role: 'user', content: 'tell me about AI' },
+          { role: 'assistant', content: 'AI is great. Want to know more?' },
+        ],
+      });
       const ctx = mockContext({
         session,
-        parsed: mockParsed({ command: '', isNLP: true, rawInput: 'make it shorter' }),
+        parsed: mockParsed({ command: '', isNLP: true, rawInput: 'tell me more about point 3' }),
       });
 
       await router.route(ctx);
-      expect(writeHandler).toHaveBeenCalledOnce();
+      expect(quickHandler).toHaveBeenCalledOnce();
     });
 
-    it('should use NLP fallback when no lastHandler', async () => {
+    it('should redirect approval-like NLP to lastHandler when conversation active and no pending approval', async () => {
+      const quickHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
+        return { session: ctx.session };
+      });
+      const approveHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
+        return { session: ctx.session };
+      });
+
+      router.register('/quick', quickHandler);
+      router.register('/approve', approveHandler);
+
+      const session = createSession({
+        lastHandler: '/quick',
+        conversationMessages: [
+          { role: 'user', content: 'analyze our Q4 results' },
+          { role: 'assistant', content: 'Q4 was strong. Want more detail?' },
+        ],
+      });
+      const ctx = mockContext({
+        session,
+        parsed: mockParsed({ command: '/approve', isNLP: true, rawInput: 'yes' }),
+      });
+
+      await router.route(ctx);
+      // Should route to /quick (conversation follow-up), NOT /approve
+      expect(quickHandler).toHaveBeenCalledOnce();
+      expect(approveHandler).not.toHaveBeenCalled();
+    });
+
+    it('should route approval NLP to approve handler when pending approval exists', async () => {
+      const quickHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
+        return { session: ctx.session };
+      });
+      const approveHandler = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
+        return { session: ctx.session };
+      });
+
+      router.register('/quick', quickHandler);
+      router.register('/approve', approveHandler);
+
+      const session = createSession({
+        lastHandler: '/quick',
+        pendingApproval: 'job-123',
+        conversationMessages: [
+          { role: 'user', content: 'write a post' },
+          { role: 'assistant', content: 'Here is your post.' },
+        ],
+      });
+      const ctx = mockContext({
+        session,
+        parsed: mockParsed({ command: '/approve', isNLP: true, rawInput: 'yes' }),
+      });
+
+      await router.route(ctx);
+      // Should route to /approve (pending approval takes priority)
+      expect(approveHandler).toHaveBeenCalledOnce();
+      expect(quickHandler).not.toHaveBeenCalled();
+    });
+
+    it('should use NLP fallback when no conversation and no lastHandler', async () => {
       const fallback = vi.fn(async (ctx: HandlerContext): Promise<HandlerResult> => {
         ctx.output('fallback');
         return { session: ctx.session };

@@ -1,9 +1,10 @@
 import { HandlerContext, HandlerResult } from '../router';
 import { withLastHandler, withLastJob, withPendingApproval } from '../session';
-import { formatError, formatSuccess, formatInfo, shortId } from '../formatter';
+import { formatError, formatSuccess, formatInfo, formatTaskComplete, shortId, createPulseSpinner, PulseSpinner } from '../formatter';
 import { promptForMissing } from '../utils/prompts';
 import { stateStore } from '../../core/state-store';
 import { clientStore } from '../../memory/client-store';
+import { runPipeline } from '../pipeline';
 
 export async function handleApprove(ctx: HandlerContext): Promise<HandlerResult> {
   const { session, parsed, rl, output } = ctx;
@@ -39,6 +40,18 @@ export async function handleApprove(ctx: HandlerContext): Promise<HandlerResult>
       metadata: { jobId: job.id, score: job.review.score },
     });
   }
+
+  // Store the actual output content as a vector for future similarity matching
+  if (newStatus === 'complete' && job.output) {
+    const content = typeof job.output === 'string' ? job.output : job.output.content;
+    if (content) {
+      await clientStore.storeClientContext(job.clientId, {
+        type: 'content',
+        text: content.substring(0, 500),
+        metadata: { jobId: job.id, type: job.type, topic: job.input?.topic },
+      });
+    }
+  }
   
   output(formatSuccess(`Job ${shortId(jobId)} approved. Status → ${newStatus}`));
   output(formatInfo('Task complete. Ready for next command.'));
@@ -52,7 +65,22 @@ export async function handleApprove(ctx: HandlerContext): Promise<HandlerResult>
 export async function handleRevise(ctx: HandlerContext): Promise<HandlerResult> {
   const { session, parsed, rl, output } = ctx;
 
-  let jobId = parsed.subcommand || parsed.args[0] || session.pendingApproval || session.lastJobId;
+  // Resolve job ID and inline feedback
+  // When session has a pending job, all parsed text is feedback (e.g. "/revise Make this shorter")
+  // When no session job, first arg is the job ID (e.g. "/revise job-1 Make it punchier")
+  let jobId: string | undefined;
+  let inlineFeedback: string | undefined;
+
+  if (session.pendingApproval || session.lastJobId) {
+    jobId = session.pendingApproval || session.lastJobId;
+    inlineFeedback = [parsed.subcommand, ...parsed.args].filter(Boolean).join(' ') || undefined;
+  } else {
+    jobId = parsed.subcommand || parsed.args[0];
+    inlineFeedback = parsed.subcommand
+      ? parsed.args.join(' ') || undefined
+      : parsed.args.slice(1).join(' ') || undefined;
+  }
+
   if (!jobId) {
     output(formatError('No pending job to revise. Run /write first or specify a job ID.'));
     return { session };
@@ -64,7 +92,7 @@ export async function handleRevise(ctx: HandlerContext): Promise<HandlerResult> 
     return { session };
   }
 
-  const feedback = await promptForMissing(rl, 'Revision notes', parsed.args.join(' ') || undefined);
+  const feedback = await promptForMissing(rl, 'Revision notes', inlineFeedback);
 
   await stateStore.updateJob(jobId, {
     status: 'revision',
@@ -72,13 +100,62 @@ export async function handleRevise(ctx: HandlerContext): Promise<HandlerResult> 
   });
 
   output(formatSuccess(`Job ${shortId(jobId)} sent back for revision.`));
-  return { session: withLastHandler(session, '/revise') };
+  output(formatInfo('Re-running pipeline with your feedback'));
+
+  // Re-run the pipeline with spinner feedback
+  let activeSpinner: PulseSpinner | null = null;
+  try {
+    const finalJob = await runPipeline(jobId, {
+      onStage: (status, label, formattedOutput) => {
+        if (activeSpinner) { activeSpinner.stop(); activeSpinner = null; }
+        if (formattedOutput) {
+          output(formattedOutput);
+        } else {
+          activeSpinner = createPulseSpinner(label);
+          activeSpinner.start();
+        }
+      },
+    });
+
+    if (activeSpinner) { activeSpinner.stop(); activeSpinner = null; }
+
+    if (finalJob.status === 'human_review') {
+      output(formatSuccess('Revised content ready — awaiting your approval'));
+      output(formatInfo('Type "approve", "revise <feedback>", or "reject" to continue.'));
+    }
+
+    output(formatTaskComplete());
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await stateStore.updateJob(jobId, { status: 'failed', error: message });
+    output(formatError(`Pipeline failed: ${message}`));
+  } finally {
+    if (activeSpinner) { activeSpinner.stop(); activeSpinner = null; }
+  }
+
+  let newSession = withPendingApproval(session, jobId);
+  newSession = withLastJob(newSession, jobId);
+  newSession = withLastHandler(newSession, '/revise');
+  return { session: newSession };
 }
 
 export async function handleReject(ctx: HandlerContext): Promise<HandlerResult> {
   const { session, parsed, rl, output } = ctx;
 
-  let jobId = parsed.subcommand || parsed.args[0] || session.pendingApproval || session.lastJobId;
+  // Same pattern as handleRevise: session-resolved job → all text is the reason
+  let jobId: string | undefined;
+  let inlineReason: string | undefined;
+
+  if (session.pendingApproval || session.lastJobId) {
+    jobId = session.pendingApproval || session.lastJobId;
+    inlineReason = [parsed.subcommand, ...parsed.args].filter(Boolean).join(' ') || undefined;
+  } else {
+    jobId = parsed.subcommand || parsed.args[0];
+    inlineReason = parsed.subcommand
+      ? parsed.args.join(' ') || undefined
+      : parsed.args.slice(1).join(' ') || undefined;
+  }
+
   if (!jobId) {
     output(formatError('No pending job to reject. Run /write first or specify a job ID.'));
     return { session };
@@ -90,7 +167,7 @@ export async function handleReject(ctx: HandlerContext): Promise<HandlerResult> 
     return { session };
   }
 
-  const reason = await promptForMissing(rl, 'Rejection reason', parsed.args.join(' ') || undefined);
+  const reason = await promptForMissing(rl, 'Rejection reason', inlineReason);
 
   await stateStore.updateJob(jobId, {
     status: 'failed',

@@ -1,4 +1,10 @@
-import { extractPlatform, extractContentType, extractTopic, looksLikeWriteRequest, looksLikeQuickRequest, looksLikeResearchRequest, looksLikeApprovalRequest } from './utils/nlp';
+import {
+  extractPlatform, extractContentType, extractTopic,
+  looksLikeWriteRequest, looksLikeQuickRequest, looksLikeResearchRequest, looksLikeApprovalRequest,
+  looksLikeStatusRequest, looksLikeHelpRequest, looksLikeCalendarRequest, looksLikeScheduleRequest,
+  looksLikeClientRequest, looksLikeUploadRequest, looksLikeReportRequest, looksLikeExportRequest,
+  looksLikeRepurposeRequest, looksLikeTrendingRequest,
+} from './utils/nlp';
 
 export interface ParsedCommand {
   command: string;       // resolved slash command (e.g., '/write')
@@ -55,8 +61,6 @@ const ALIASES: Record<string, string> = {
   '/sh': '/show',
   '/h': '/help',
   '/?': '/help',
-  '/d': '/debug',
-  '/set': '/settings',
   '/exit': '/quit',
   '/bye': '/quit',
 };
@@ -67,10 +71,18 @@ const VALID_COMMANDS = new Set([
   '/client', '/approve', '/revise', '/reject',
   '/schedule', '/publish', '/queue',
   '/status', '/history', '/show',
-  '/help', '/settings', '/debug', '/quit',
+  '/help', '/quit',
   '/upload', '/uploads', '/repurpose', '/trending',
-  '/export',
+  '/export', '/command', '/read',
 ]);
+
+export function registerCommand(cmd: string): void {
+  VALID_COMMANDS.add(cmd);
+}
+
+export function unregisterCommand(cmd: string): void {
+  VALID_COMMANDS.delete(cmd);
+}
 
 export function parse(input: string): ParsedCommand {
   const trimmed = input.trim();
@@ -83,6 +95,18 @@ export function parse(input: string): ParsedCommand {
   // Slash command path
   if (trimmed.startsWith('/')) {
     return parseSlashCommand(trimmed, rawInput);
+  }
+
+  // Bare word rewrite: if the first word is a known command name, parse as slash command
+  // e.g. "client pillars add AI" → "/client pillars add AI" (preserves subcommand/args)
+  const firstSpace = trimmed.indexOf(' ');
+  const firstWord = (firstSpace > 0 ? trimmed.substring(0, firstSpace) : trimmed).toLowerCase();
+  const asSlashCmd = '/' + firstWord;
+  if (VALID_COMMANDS.has(asSlashCmd)) {
+    const rest = firstSpace > 0 ? trimmed.substring(firstSpace) : '';
+    const parsed = parseSlashCommand(asSlashCmd + rest, rawInput);
+    parsed.isNLP = true;
+    return parsed;
   }
 
   // NLP path: detect intent from natural language
@@ -136,6 +160,26 @@ function parseNLP(input: string, rawInput: string): ParsedCommand {
     command = '/quick';
   } else if (looksLikeResearchRequest(input)) {
     command = '/research';
+  } else if (looksLikeStatusRequest(input)) {
+    command = '/status';
+  } else if (looksLikeHelpRequest(input)) {
+    command = '/help';
+  } else if (looksLikeCalendarRequest(input)) {
+    command = '/calendar';
+  } else if (looksLikeScheduleRequest(input)) {
+    command = '/schedule';
+  } else if (looksLikeClientRequest(input)) {
+    command = '/client';
+  } else if (looksLikeUploadRequest(input)) {
+    command = '/upload';
+  } else if (looksLikeReportRequest(input)) {
+    command = '/report';
+  } else if (looksLikeExportRequest(input)) {
+    command = '/export';
+  } else if (looksLikeRepurposeRequest(input)) {
+    command = '/repurpose';
+  } else if (looksLikeTrendingRequest(input)) {
+    command = '/trending';
   }
 
   // Extract flags from NLP input too

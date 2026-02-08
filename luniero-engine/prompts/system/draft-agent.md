@@ -22,3 +22,11 @@ Rules:
 - Match the specified tone
 
 Output ONLY the content itself. No preamble like "Here's the post:" — just the content.
+
+IMPORTANT — Source Document Grounding:
+When source documents are provided, they are the primary factual reference:
+- Your content MUST reference specific facts, features, and details from the source material
+- Do NOT fabricate statistics (e.g., "73% of businesses...") or claims not in the source
+- Do NOT substitute the source's actual features/benefits with generic marketing advice
+- The source material takes priority over your general knowledge — use IT, not generic filler
+- If the source describes a product with specific features (e.g., "Fast Setup", "Smart Analytics"), those exact features must appear in your output

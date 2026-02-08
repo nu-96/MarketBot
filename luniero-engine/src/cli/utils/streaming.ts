@@ -1,3 +1,8 @@
+// ANSI helpers (local to avoid circular import with formatter)
+const BOLD = '\x1b[1m';
+const RESET = '\x1b[0m';
+const hi = (s: string) => `${BOLD}${s}${RESET}`;
+
 // Pulsing circle animation per spec: ○ ◎ ● ◎
 const PULSE_FRAMES = ['○', '◎', '●', '◎'];
 const PULSE_INTERVAL_MS = 300;
@@ -62,7 +67,7 @@ export function formatPipelineTree(stages: PipelineStage[]): string {
         break;
       }
       case 'active': {
-        const detail = stage.detail ? ` — ${stage.detail}` : '...';
+        const detail = stage.detail ? ` — ${stage.detail}` : '';
         lines.push(`${prefix} ● ${stage.name}${detail}`);
         break;
       }
@@ -81,44 +86,44 @@ export function formatPipelineTree(stages: PipelineStage[]): string {
   return lines.join('\n');
 }
 
-// Rotating stage messages per spec
+// Rotating stage messages per spec — key terms highlighted in bold
 export const STAGE_MESSAGES: Record<string, string[]> = {
   context: [
-    'Loading your brand profile — so the content sounds like you',
-    'Fetching brand voice — checking your tone preferences',
-    'Pulling content pillars — these guide what topics to focus on',
-    'Reviewing recent feedback — learning from past content',
+    `Loading your ${hi('brand profile')} — so the content sounds like you`,
+    `Fetching ${hi('brand voice')} — checking your tone preferences`,
+    `Pulling ${hi('content pillars')} — these guide what topics to focus on`,
+    `Reviewing recent ${hi('feedback')} — learning from past content`,
   ],
   brief: [
-    'Analyzing your request — understanding what you need',
-    'Researching angles — finding the best way to approach this',
-    'Structuring the brief — mapping out the content flow',
-    'Finalizing key messages — picking the most impactful points',
+    `Analyzing your ${hi('request')} — understanding what you need`,
+    `Researching ${hi('angles')} — finding the best way to approach this`,
+    `Structuring the ${hi('brief')} — mapping out the content flow`,
+    `Finalizing ${hi('key messages')} — picking the most impactful points`,
   ],
   draft: [
-    'Writing the first draft — this takes a few seconds',
-    'Crafting your hook — the first line matters most',
-    'Building the story — connecting your key points',
-    'Adding details — making it specific and credible',
-    'Wrapping up — ending with a clear call to action',
+    `Writing the ${hi('first draft')} — this takes a few seconds`,
+    `Crafting your ${hi('hook')} — the first line matters most`,
+    `Building the ${hi('story')} — connecting your key points`,
+    `Adding ${hi('details')} — making it specific and credible`,
+    `Wrapping up — ending with a clear ${hi('call to action')}`,
   ],
   polish: [
-    'Matching your voice — making sure it sounds like your brand',
-    'Smoothing transitions — improving the flow',
-    'Strengthening the hook — grabbing attention faster',
-    'Final polish — small tweaks that make a big difference',
+    `Matching your ${hi('voice')} — making sure it sounds like your brand`,
+    `Smoothing ${hi('transitions')} — improving the flow`,
+    `Strengthening the ${hi('hook')} — grabbing attention faster`,
+    `Final ${hi('polish')} — small tweaks that make a big difference`,
   ],
   review: [
-    'Checking brand fit — does this sound like you?',
-    'Validating structure — is the flow logical?',
-    'Scoring engagement — will people want to read this?',
-    'Final check — making sure it\'s ready to publish',
+    `Checking ${hi('brand fit')} — does this sound like you?`,
+    `Validating ${hi('structure')} — is the flow logical?`,
+    `Scoring ${hi('engagement')} — will people want to read this?`,
+    `Final ${hi('check')} — making sure it's ready to publish`,
   ],
 };
 
 export function getRotatingMessage(stage: string, index: number): string {
   const messages = STAGE_MESSAGES[stage];
-  if (!messages || messages.length === 0) return `${stage}...`;
+  if (!messages || messages.length === 0) return stage;
   return messages[index % messages.length];
 }
 

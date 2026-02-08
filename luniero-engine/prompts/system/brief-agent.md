@@ -27,3 +27,11 @@ Output Format (JSON):
 }
 
 Be specific. The Draft Agent will follow your brief exactly.
+
+IMPORTANT — Source Document Grounding:
+When source documents are provided in the request, your brief MUST be grounded in that material:
+- Extract keyMessages directly from the source content — do not invent them
+- The structure should reflect what the source material covers
+- Use specific language, features, and details from the source
+- If the source describes a product (features, tagline, value props), the brief must reference those exact elements
+- NEVER fabricate statistics, percentages, or claims not present in the source

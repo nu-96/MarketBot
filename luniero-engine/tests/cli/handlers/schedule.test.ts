@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as readline from 'readline';
 import { HandlerContext } from '../../../src/cli/router';
 import { createSession } from '../../../src/cli/session';
@@ -59,8 +59,8 @@ const completeJob = {
   input: { topic: 'AI' },
   iteration: 1,
   maxIterations: 3,
-  createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
   output: { content: 'Hello' },
 };
 
@@ -72,6 +72,11 @@ const draftingJob = {
 describe('handleSchedule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('should require job ID', async () => {
@@ -98,19 +103,67 @@ describe('handleSchedule', () => {
     expect(calls.some((msg: string) => msg.includes('must be complete'))).toBe(true);
   });
 
-  it('should schedule a complete job', async () => {
+  it('should schedule a complete job and set status to scheduled', async () => {
     vi.mocked(stateStore.getJob).mockResolvedValueOnce(completeJob as any);
 
     const ctx = mockCtx({
       parsed: { command: '/schedule', subcommand: '', args: ['job-1'], flags: {}, rawInput: '/schedule job-1', isNLP: false } as ParsedCommand,
-      rl: mockRL(['2024-03-01 10:00']),
+      rl: mockRL(['2026-03-01 10:00']),
     });
 
     await handleSchedule(ctx);
 
-    expect(stateStore.updateJob).toHaveBeenCalled();
+    expect(stateStore.updateJob).toHaveBeenCalledWith('job-1', expect.objectContaining({
+      status: 'scheduled',
+    }));
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('scheduled'))).toBe(true);
+    const allOutput = calls.join('\n');
+    expect(allOutput).toContain('Scheduled Successfully');
+    expect(allOutput).toContain('scheduled');
+  });
+
+  it('should store scheduledAt in output', async () => {
+    vi.mocked(stateStore.getJob).mockResolvedValueOnce(completeJob as any);
+
+    const ctx = mockCtx({
+      parsed: { command: '/schedule', subcommand: '', args: ['job-1'], flags: {}, rawInput: '/schedule job-1', isNLP: false } as ParsedCommand,
+      rl: mockRL(['2026-03-01 10:00']),
+    });
+
+    await handleSchedule(ctx);
+
+    const updateCall = vi.mocked(stateStore.updateJob).mock.calls[0];
+    expect(updateCall[1].output.scheduledAt).toBe('2026-03-01 10:00');
+  });
+
+  it('should fire alert when schedule time arrives', async () => {
+    // Set "now" to a known time
+    vi.setSystemTime(new Date('2026-03-01T09:00:00'));
+    vi.mocked(stateStore.getJob).mockResolvedValueOnce(completeJob as any);
+    vi.mocked(stateStore.updateJob).mockResolvedValue(completeJob as any);
+
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const ctx = mockCtx({
+      parsed: { command: '/schedule', subcommand: '', args: ['job-1'], flags: {}, rawInput: '/schedule job-1', isNLP: false } as ParsedCommand,
+      rl: mockRL(['2026-03-01 10:00']),
+    });
+
+    await handleSchedule(ctx);
+
+    // Advance time to trigger the alert
+    vi.advanceTimersByTime(60 * 60 * 1000); // 1 hour
+
+    // Should have written the alert to stdout
+    const stdoutCalls = writeSpy.mock.calls.map(c => c[0]).join('');
+    expect(stdoutCalls).toContain('SCHEDULED CONTENT READY');
+
+    // Should update status back to complete
+    const updateCalls = vi.mocked(stateStore.updateJob).mock.calls;
+    const completeUpdate = updateCalls.find(c => c[1].status === 'complete');
+    expect(completeUpdate).toBeTruthy();
+
+    writeSpy.mockRestore();
   });
 });
 
@@ -129,7 +182,7 @@ describe('handlePublish', () => {
     await handlePublish(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
-    expect(calls.some((msg: string) => msg.toLowerCase().includes('published'))).toBe(true);
+    expect(calls.some((msg: string) => msg.toLowerCase().includes('coming soon'))).toBe(true);
   });
 
   it('should require complete status', async () => {
@@ -173,7 +226,7 @@ describe('handleQueue', () => {
     expect(calls.some((msg: string) => msg.includes('No queued'))).toBe(true);
   });
 
-  it('should show pending jobs', async () => {
+  it('should show in-progress jobs', async () => {
     vi.mocked(stateStore.getJobsByClient).mockResolvedValueOnce([
       { ...completeJob, id: 'job-2', status: 'drafting' },
       { ...completeJob, id: 'job-3', status: 'human_review' },
@@ -189,10 +242,53 @@ describe('handleQueue', () => {
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
     const allOutput = calls.join('\n');
-    // Should show drafting and human_review (non-terminal), not complete/failed
+    expect(allOutput).toContain('In Progress');
     expect(allOutput).toContain('job-2');
     expect(allOutput).toContain('job-3');
     expect(allOutput).not.toContain('job-4');
     expect(allOutput).not.toContain('job-5');
+  });
+
+  it('should show scheduled jobs in purple section', async () => {
+    vi.mocked(stateStore.getJobsByClient).mockResolvedValueOnce([
+      { ...completeJob, id: 'job-sched-1', status: 'scheduled', output: { content: 'Hello', scheduledAt: '2026-03-01 10:00' } },
+      { ...completeJob, id: 'job-sched-2', status: 'scheduled', output: { content: 'World', scheduledAt: '2026-03-02 14:00' } },
+      { ...completeJob, id: 'job-done', status: 'complete' },
+    ] as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+    });
+
+    await handleQueue(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    const allOutput = calls.join('\n');
+    expect(allOutput).toContain('Scheduled');
+    expect(allOutput).toContain('job-sched-1');
+    expect(allOutput).toContain('job-sched-2');
+    expect(allOutput).toContain('2026-03-01 10:00');
+    expect(allOutput).toContain('2026-03-02 14:00');
+    expect(allOutput).not.toContain('job-done');
+  });
+
+  it('should show both scheduled and in-progress jobs', async () => {
+    vi.mocked(stateStore.getJobsByClient).mockResolvedValueOnce([
+      { ...completeJob, id: 'job-s', status: 'scheduled', output: { scheduledAt: '2026-03-01 10:00' } },
+      { ...completeJob, id: 'job-d', status: 'drafting' },
+    ] as any);
+
+    const ctx = mockCtx({
+      session: createSession({ activeClientId: 'acme' }),
+    });
+
+    await handleQueue(ctx);
+
+    const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    const allOutput = calls.join('\n');
+    expect(allOutput).toContain('Scheduled');
+    expect(allOutput).toContain('In Progress');
+    expect(allOutput).toContain('job-s');
+    expect(allOutput).toContain('job-d');
   });
 });

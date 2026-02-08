@@ -52,6 +52,7 @@ vi.mock('../../src/memory/client-store', () => ({
     getContentPillars: vi.fn().mockResolvedValue(['innovation']),
     getRecentFeedback: vi.fn().mockResolvedValue([]),
     searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
     storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -201,7 +202,7 @@ describe('Draft Agent (via pipeline)', () => {
 
     const result = await runPipeline('draft-2', { onStage: vi.fn() });
 
-    expect(result.status).toBe('complete');
+    expect(result.status).toBe('human_review');
     expect(draftCallCount).toBe(2);
   });
 

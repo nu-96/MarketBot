@@ -27,6 +27,7 @@ export type JobStatus =
   | 'reviewing'
   | 'revision'
   | 'human_review'
+  | 'scheduled'
   | 'complete'
   | 'failed';
 

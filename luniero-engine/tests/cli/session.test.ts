@@ -7,7 +7,6 @@ import {
   withLastJob,
   withLastHandler,
   withPendingApproval,
-  withDebug,
   Session,
 } from '../../src/cli/session';
 
@@ -21,14 +20,12 @@ describe('session', () => {
       expect(session.lastHandler).toBeNull();
       expect(session.pendingApproval).toBeNull();
       expect(session.history).toEqual([]);
-      expect(session.debug).toBe(false);
       expect(session.startedAt).toBeDefined();
     });
 
     it('should accept overrides', () => {
-      const session = createSession({ activeClientId: 'acme', debug: true });
+      const session = createSession({ activeClientId: 'acme' });
       expect(session.activeClientId).toBe('acme');
-      expect(session.debug).toBe(true);
     });
 
     it('should not mutate overrides object', () => {
@@ -48,10 +45,10 @@ describe('session', () => {
     });
 
     it('should preserve unmodified fields', () => {
-      const original = createSession({ debug: true });
-      const updated = updateSession(original, { activeClientId: 'test' });
-      expect(updated.debug).toBe(true);
-      expect(updated.activeClientId).toBe('test');
+      const original = createSession({ activeClientId: 'acme' });
+      const updated = updateSession(original, { lastCommand: '/help' });
+      expect(updated.activeClientId).toBe('acme');
+      expect(updated.lastCommand).toBe('/help');
     });
   });
 
@@ -130,20 +127,6 @@ describe('session', () => {
     });
   });
 
-  describe('withDebug', () => {
-    it('should enable debug', () => {
-      const session = createSession();
-      const updated = withDebug(session, true);
-      expect(updated.debug).toBe(true);
-    });
-
-    it('should disable debug', () => {
-      const session = createSession({ debug: true });
-      const updated = withDebug(session, false);
-      expect(updated.debug).toBe(false);
-    });
-  });
-
   describe('immutability', () => {
     it('should not allow mutation of history array', () => {
       const session = createSession();
@@ -156,14 +139,14 @@ describe('session', () => {
       const s0 = createSession();
       const s1 = withClient(s0, 'acme');
       const s2 = withLastCommand(s1, '/help');
-      const s3 = withDebug(s2, true);
+      const s3 = withPendingApproval(s2, 'job-1');
 
       expect(s0.activeClientId).toBeNull();
       expect(s1.activeClientId).toBe('acme');
       expect(s1.lastCommand).toBeNull();
       expect(s2.lastCommand).toBe('/help');
-      expect(s2.debug).toBe(false);
-      expect(s3.debug).toBe(true);
+      expect(s2.pendingApproval).toBeNull();
+      expect(s3.pendingApproval).toBe('job-1');
     });
   });
 });

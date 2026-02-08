@@ -42,6 +42,7 @@ vi.mock('../../src/memory/client-store', () => ({
     getContentPillars: vi.fn().mockResolvedValue(['Testing']),
     getRecentFeedback: vi.fn().mockResolvedValue([]),
     searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
     storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -145,7 +146,7 @@ describe('Pipeline Integration', () => {
     const stages: string[] = [];
     const result = await runPipeline('pipe-2', { onStage: (s) => stages.push(s) });
 
-    expect(result.status).toBe('complete');
+    expect(result.status).toBe('human_review');
     expect(stages).toContain('revision');
     expect(reviewCount).toBe(2);
   });
@@ -179,18 +180,19 @@ describe('Pipeline Integration', () => {
     expect(result.status).toBe('human_review');
   });
 
-  it('should store client context after completion', async () => {
+  it('should produce output ready for approval and context storage', async () => {
     await stateStore.createJob({
       id: 'pipe-4', clientId: 'test', type: 'social_post', status: 'received' as const,
       input: { clientId: 'test', type: 'social_post', topic: 'testing', platform: 'twitter' },
       maxIterations: 3,
     });
 
-    await runPipeline('pipe-4', { onStage: vi.fn() });
+    const result = await runPipeline('pipe-4', { onStage: vi.fn() });
 
-    expect(clientStore.storeClientContext).toHaveBeenCalledWith('test', expect.objectContaining({
-      type: 'content',
-      text: expect.stringContaining('testing'),
-    }));
+    // Pipeline ends at human_review with output ready for approval handler
+    // (approval handler stores client context vectors upon completion)
+    expect(result.status).toBe('human_review');
+    expect(result.output).toBeDefined();
+    expect(result.output.content).toBeTruthy();
   });
 });

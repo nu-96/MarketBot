@@ -25,6 +25,10 @@ export class CommandRouter {
     this.handlers.set(command, handler);
   }
 
+  unregister(command: string): void {
+    this.handlers.delete(command);
+  }
+
   registerNLPFallback(handler: CommandHandler): void {
     this.nlpFallback = handler;
   }
@@ -40,6 +44,17 @@ export class CommandRouter {
 
       // NLP-detected command
       if (parsed.isNLP && parsed.command) {
+        // Conversational follow-up: when there's an active conversation and
+        // the input is ambiguous (approval-like: yes/no/ok), prefer continuing
+        // the conversation over routing to approve/revise/reject
+        const isApprovalLike = ['/approve', '/revise', '/reject'].includes(parsed.command);
+        if (isApprovalLike && session.conversationMessages.length > 0 && !session.pendingApproval && session.lastHandler) {
+          const followUpHandler = this.handlers.get(session.lastHandler);
+          if (followUpHandler) {
+            return await this.safeExecute(followUpHandler, ctx);
+          }
+        }
+
         const handler = this.handlers.get(parsed.command);
         if (handler) {
           return await this.safeExecute(handler, ctx);
@@ -49,7 +64,7 @@ export class CommandRouter {
       // NLP with no command detected → conversational follow-up or fallback
       if (parsed.isNLP && !parsed.command) {
         // Try last handler for conversational follow-up
-        if (session.lastHandler) {
+        if (session.lastHandler && session.conversationMessages.length > 0) {
           const handler = this.handlers.get(session.lastHandler);
           if (handler) {
             return await this.safeExecute(handler, ctx);
@@ -95,7 +110,11 @@ export class CommandRouter {
       return await handler(ctx);
     } catch (err) {
       // Handler-level error catch (first layer)
-      const message = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error
+        ? err.message
+        : (typeof err === 'object' && err !== null && 'message' in err)
+          ? String((err as any).message)
+          : JSON.stringify(err);
       ctx.output(formatError(`Command failed: ${message}`));
       return { session: ctx.session };
     }

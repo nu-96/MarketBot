@@ -24,4 +24,7 @@ Focus on:
 
 Keep the original meaning. Improve the delivery.
 
+IMPORTANT — Source Document Fidelity:
+When source documents are provided, do NOT introduce new claims, statistics, or features during polishing. You may improve language, flow, and engagement — but all factual content must remain anchored to the original source material. Do not replace specific details with generic statements.
+
 Output ONLY the polished content. No preamble, no explanations — just the content itself.

@@ -25,7 +25,9 @@ vi.mock('../../../src/memory/client-store', () => ({
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
     searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
     storeClientContext: vi.fn().mockResolvedValue(undefined),
+    getVectorStats: vi.fn().mockResolvedValue({ totalVectors: 0, documents: [] }),
   },
 }));
 
@@ -38,8 +40,8 @@ vi.mock('../../../src/cli/pipeline', () => ({
     input: { topic: 'AI' },
     iteration: 1,
     maxIterations: 3,
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
     output: { content: 'Hello world' },
     review: { score: 85 },
   }),
@@ -68,6 +70,7 @@ function mockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
 describe('handleWrite', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   });
 
   it('should require a client', async () => {

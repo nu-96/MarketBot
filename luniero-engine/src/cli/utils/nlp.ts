@@ -104,6 +104,100 @@ export function looksLikeResearchRequest(input: string): boolean {
   return researchPatterns.some(p => p.test(lower));
 }
 
+export function looksLikeStatusRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(status|check status|what'?s the status|show status|job status)\b/,
+    /^(how'?s it going|progress|check progress|any updates)\b/,
+    /^(show|list|view)\s+(jobs?|tasks?|queue)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeHelpRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(help|commands|what can you do|how do i|show commands)\b/,
+    /^(what are the commands|available commands|menu)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeCalendarRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(calendar|show calendar|view calendar|content calendar|my calendar)\b/,
+    /^(what'?s scheduled|upcoming|planned|show plan)\b/,
+    /\b(calendar|schedule)\b.*\b(view|show|this week|this month)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeScheduleRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(schedule|schedule a|schedule for|schedule this|plan a)\b/,
+    /\b(schedule|queue|plan)\b.*\b(post|content|publish)\b/,
+    /^(publish|post)\b.*\b(at|on|later|tomorrow|next)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeClientRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(switch client|change client|new client|add client|create client)\b/,
+    /^(client|clients|show clients|list clients|my clients)\b/,
+    /^(switch to|change to)\b.*\bclient\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeUploadRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(upload|import|add file|load file|ingest)\b/,
+    /\b(upload|import|add)\b.*\b(file|pdf|document|doc|csv)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeReportRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(report|analytics|show report|show analytics|performance)\b/,
+    /^(how did|how are|show me).*\b(perform|doing|stats|numbers)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeExportRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(export|save|download|save as|export as)\b/,
+    /\b(export|save|download)\b.*\b(file|markdown|json|txt|md)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeRepurposeRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(repurpose|convert|transform|adapt|reformat)\b/,
+    /\b(repurpose|convert|turn)\b.*\b(into|to|for)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
+export function looksLikeTrendingRequest(input: string): boolean {
+  const lower = input.toLowerCase().trim();
+  const patterns = [
+    /^(trending|what'?s trending|trends|hot topics|popular)\b/,
+    /\b(trending|hot|popular)\b.*\b(topics?|now|today)\b/,
+  ];
+  return patterns.some(p => p.test(lower));
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -28,6 +28,7 @@ vi.mock('../../src/memory/client-store', () => ({
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
     searchClientContext: vi.fn().mockResolvedValue([]),
+    searchByFileName: vi.fn().mockResolvedValue([]),
     storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -41,8 +42,8 @@ vi.mock('../../src/cli/pipeline', () => ({
     input: { topic: 'AI' },
     iteration: 1,
     maxIterations: 3,
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
     output: { content: 'Integration test response' },
     review: { score: 92 },
   }),
@@ -61,10 +62,9 @@ vi.mock('@anthropic-ai/sdk', () => ({
 import { parse } from '../../src/cli/parser';
 import { CommandRouter, HandlerContext } from '../../src/cli/router';
 import { createSession, withClient, withLastCommand, Session } from '../../src/cli/session';
-import { handleHelp, handleSettings } from '../../src/cli/handlers/help';
+import { handleHelp } from '../../src/cli/handlers/help';
 import { handleClient } from '../../src/cli/handlers/client';
 import { handleStatus } from '../../src/cli/handlers/status';
-import { handleDebug } from '../../src/cli/handlers/debug';
 import { handleWrite } from '../../src/cli/handlers/write';
 import { handleApprove } from '../../src/cli/handlers/approval';
 import { clientStore } from '../../src/memory/client-store';
@@ -96,7 +96,7 @@ describe('CLI Integration Flow', () => {
     vi.clearAllMocks();
   });
 
-  it('should complete a full session flow: help → client create → client switch → status → debug', async () => {
+  it('should complete a full session flow: help → client create → client switch → status', async () => {
     let session = createSession();
     let outputLines: string[];
     let ctx: HandlerContext;
@@ -108,25 +108,25 @@ describe('CLI Integration Flow', () => {
     expect(outputLines.some(l => l.includes('/write'))).toBe(true);
     expect(session.lastHandler).toBe('/help');
 
-    // Step 2: /client new test "Test Corp" SaaS
-    ({ ctx, outputLines } = buildCtx('/client new test "Test Corp" SaaS', session));
+    // Step 2: /client new "Test Corp" SaaS (auto-generates ID "test-corp")
+    ({ ctx, outputLines } = buildCtx('/client new "Test Corp" SaaS', session));
     const clientResult = await handleClient(ctx);
     session = clientResult.session;
-    expect(clientStore.saveProfile).toHaveBeenCalledWith('test', expect.objectContaining({
-      id: 'test',
+    expect(clientStore.saveProfile).toHaveBeenCalledWith('test-corp', expect.objectContaining({
+      id: 'test-corp',
       name: 'Test Corp',
       industry: 'SaaS',
     }));
-    expect(session.activeClientId).toBe('test');
+    expect(session.activeClientId).toBe('test-corp');
 
-    // Step 3: /client switch test
+    // Step 3: /client switch test-corp
     (clientStore.getProfile as any).mockResolvedValueOnce({
-      id: 'test', name: 'Test Corp', industry: 'SaaS',
+      id: 'test-corp', name: 'Test Corp', industry: 'SaaS',
     });
-    ({ ctx, outputLines } = buildCtx('/client switch test', session));
+    ({ ctx, outputLines } = buildCtx('/client switch test-corp', session));
     const switchResult = await handleClient(ctx);
     session = switchResult.session;
-    expect(session.activeClientId).toBe('test');
+    expect(session.activeClientId).toBe('test-corp');
     expect(outputLines.some(l => l.includes('Switched'))).toBe(true);
 
     // Step 4: /status (no jobs yet)
@@ -134,12 +134,6 @@ describe('CLI Integration Flow', () => {
     const statusResult = await handleStatus(ctx);
     session = statusResult.session;
     expect(outputLines.some(l => l.includes('No jobs'))).toBe(true);
-
-    // Step 5: /debug status
-    ({ ctx, outputLines } = buildCtx('/debug status', session));
-    const debugResult = await handleDebug(ctx);
-    session = debugResult.session;
-    expect(outputLines.some(l => l.includes('SYSTEM STATUS'))).toBe(true);
   });
 
   it('should parse and route NLP input to /write', async () => {
@@ -174,8 +168,6 @@ describe('CLI Integration Flow', () => {
     expect(parse('/c list').command).toBe('/client');
     expect(parse('/c list').subcommand).toBe('list');
     expect(parse('/s').command).toBe('/status');
-    expect(parse('/d status').command).toBe('/debug');
-    expect(parse('/d status').subcommand).toBe('status');
     expect(parse('/?').command).toBe('/help');
   });
 
@@ -201,13 +193,11 @@ describe('CLI Integration Flow', () => {
     const router = new CommandRouter();
     router.register('/help', handleHelp);
     router.register('/status', handleStatus);
-    router.register('/debug', handleDebug);
-    router.register('/settings', handleSettings);
 
     const tricky = [
       '', '  ', '/unknown', '////', '/help', '/status',
-      '/debug status', 'random text', '🚀', '/write --flag=',
-      'write a post about nothing', '/settings debug',
+      'random text', '🚀', '/write --flag=',
+      'write a post about nothing',
     ];
 
     for (const input of tricky) {
@@ -227,21 +217,17 @@ describe('CLI Integration Flow', () => {
   it('should maintain session state across commands', async () => {
     let session = createSession();
 
-    // Simulate: /settings debug → toggles debug
-    const { ctx: settingsCtx, outputLines: settingsOut } = buildCtx('/settings debug', session);
-    const settingsResult = await handleSettings(settingsCtx);
-    session = settingsResult.session;
-    expect(session.debug).toBe(true);
-
-    // Session carries forward
-    expect(session.lastHandler).toBe('/settings');
-
     // /help
     const { ctx: helpCtx } = buildCtx('/help', session);
     const helpResult = await handleHelp(helpCtx);
     session = helpResult.session;
-    expect(session.debug).toBe(true); // debug still on
     expect(session.lastHandler).toBe('/help');
+
+    // /status — session carries forward
+    const { ctx: statusCtx } = buildCtx('/status', session);
+    const statusResult = await handleStatus(statusCtx);
+    session = statusResult.session;
+    expect(session.lastHandler).toBe('/status');
   });
 
   it('should handle approval flow', async () => {
@@ -251,7 +237,7 @@ describe('CLI Integration Flow', () => {
     (stateStore.getJob as any).mockResolvedValueOnce({
       id: 'job-1', clientId: 'acme', type: 'social_post', status: 'human_review',
       input: { topic: 'AI' }, iteration: 1, maxIterations: 3,
-      createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     });
 
     const { ctx, outputLines } = buildCtx('/approve job-1', session);
