@@ -145,6 +145,31 @@ describe('parser', () => {
       expect(result.isNLP).toBe(true);
     });
 
+    it('should detect approval intent', () => {
+      expect(parse('approve').command).toBe('/approve');
+      expect(parse('yes').command).toBe('/approve');
+      expect(parse('ok').command).toBe('/approve');
+      expect(parse('lgtm').command).toBe('/approve');
+      expect(parse('looks good').command).toBe('/approve');
+      expect(parse('ship it').command).toBe('/approve');
+    });
+
+    it('should detect revise intent', () => {
+      expect(parse('revise').command).toBe('/revise');
+      expect(parse('edit').command).toBe('/revise');
+      expect(parse('change').command).toBe('/revise');
+      expect(parse('fix').command).toBe('/revise');
+      expect(parse('redo').command).toBe('/revise');
+      expect(parse('try again').command).toBe('/revise');
+    });
+
+    it('should detect reject intent', () => {
+      expect(parse('reject').command).toBe('/reject');
+      expect(parse('no').command).toBe('/reject');
+      expect(parse('nope').command).toBe('/reject');
+      expect(parse('scrap').command).toBe('/reject');
+    });
+
     it('should return empty command for unrecognized NLP', () => {
       const result = parse('hello there');
       expect(result.command).toBe('');

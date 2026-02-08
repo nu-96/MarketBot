@@ -56,6 +56,48 @@ CREATE TABLE content_feedback (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Enable pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Client context vectors table
+CREATE TABLE client_context_vectors (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id TEXT NOT NULL REFERENCES client_profiles(id),
+  type TEXT NOT NULL CHECK (type IN ('feedback', 'preference', 'content', 'interaction')),
+  text TEXT NOT NULL,
+  embedding vector(384),
+  metadata JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Index for fast similarity search
+CREATE INDEX ON client_context_vectors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Function for similarity search
+CREATE OR REPLACE FUNCTION match_client_context(
+  p_client_id TEXT,
+  query_embedding vector(384),
+  match_count INT DEFAULT 5
+)
+RETURNS TABLE (
+  text TEXT,
+  type TEXT,
+  score FLOAT,
+  metadata JSONB
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT
+    text,
+    type,
+    1 - (embedding <=> query_embedding) as score,
+    metadata
+  FROM client_context_vectors
+  WHERE client_context_vectors.client_id = p_client_id
+  ORDER BY embedding <=> query_embedding
+  LIMIT match_count;
+$$;
+
 -- Indexes
 CREATE INDEX idx_jobs_client ON jobs(client_id);
 CREATE INDEX idx_jobs_status ON jobs(status);

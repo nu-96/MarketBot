@@ -5,9 +5,10 @@ import { config } from '../config';
 import { stateStore, Job } from '../core/state-store';
 import { clientStore } from '../memory/client-store';
 import { logger } from '../utils/logger';
+import { formatAgentOutput } from './formatter';
 
 export interface PipelineProgress {
-  onStage: (status: string, label: string) => void;
+  onStage: (status: string, label: string, formattedOutput?: string) => void;
 }
 
 const MODEL = 'claude-sonnet-4-20250514';
@@ -165,7 +166,7 @@ export async function runPipeline(
   const reviewSystemPrompt = loadSystemPrompt('review-agent');
 
   // --- Stage 1: Context ---
-  progress.onStage('context_loading', 'Loading client context');
+  progress.onStage('context_loading', 'Pulling up your client info...');
   let job = await stateStore.getJob(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
 
@@ -176,18 +177,26 @@ export async function runPipeline(
     clientStore.getRecentFeedback(job.clientId, 5),
   ]);
 
+  // Semantic search for relevant past interactions
+  const relevantContext = await clientStore.searchClientContext(
+    job.clientId,
+    job.input.topic,
+    3,
+  );
+
   const context = {
     profile: clientProfile,
     brandVoice,
     contentPillars,
     recentFeedback,
+    relevantHistory: relevantContext,
     preferences: clientProfile?.preferences || {},
   };
 
   job = await stateStore.updateJob(jobId, { status: 'context_loading', context });
 
   // --- Stage 2: Brief ---
-  progress.onStage('briefing', 'Creating brief');
+  progress.onStage('briefing', 'Thinking through the content brief...');
   job = await stateStore.updateJob(jobId, { status: 'briefing' });
 
   const briefResponse = await callLLM(anthropic, briefSystemPrompt, buildBriefPrompt(job));
@@ -195,6 +204,7 @@ export async function runPipeline(
   if (!brief) throw new Error('Failed to parse brief from LLM response');
 
   job = await stateStore.updateJob(jobId, { brief });
+  progress.onStage('briefing', 'Brief ready', formatAgentOutput('brief', brief));
   logger.info(`Brief created for job ${jobId}`, { title: brief.title });
 
   // --- Stage 3–5: Draft → Polish → Review loop ---
@@ -203,7 +213,7 @@ export async function runPipeline(
 
   for (let iteration = 0; iteration <= maxIterations; iteration++) {
     // --- Stage 3: Draft ---
-    progress.onStage('drafting', iteration > 0 ? `Revising draft (iteration ${iteration + 1})` : 'Writing draft');
+    progress.onStage('drafting', iteration > 0 ? `Taking another pass at the draft (round ${iteration + 1})...` : 'Writing the first draft...');
     job = await stateStore.updateJob(jobId, { status: 'drafting' });
 
     const draftResponse = await callLLM(anthropic, draftSystemPrompt, buildDraftPrompt(job, revisionIssues), {
@@ -211,33 +221,37 @@ export async function runPipeline(
       temperature: 0.8,
     });
 
+    const draftWordCount = draftResponse.split(/\s+/).length;
     job = await stateStore.updateJob(jobId, {
       draft: {
         content: draftResponse,
-        wordCount: draftResponse.split(/\s+/).length,
+        wordCount: draftWordCount,
         iteration,
       },
     });
-    logger.info(`Draft created for job ${jobId}`, { wordCount: draftResponse.split(/\s+/).length, iteration });
+    progress.onStage('drafting', 'Draft done', formatAgentOutput('draft', { content: draftResponse, wordCount: draftWordCount }));
+    logger.info(`Draft created for job ${jobId}`, { wordCount: draftWordCount, iteration });
 
     // --- Stage 4: Polish ---
-    progress.onStage('polishing', 'Polishing content');
+    progress.onStage('polishing', 'Polishing it up — tightening language, matching brand voice...');
     job = await stateStore.updateJob(jobId, { status: 'polishing' });
 
     const polishResponse = await callLLM(anthropic, polishSystemPrompt, buildPolishPrompt(job), {
       temperature: 0.5,
     });
 
+    const polishWordCount = polishResponse.split(/\s+/).length;
     job = await stateStore.updateJob(jobId, {
       polishedDraft: {
         content: polishResponse,
-        wordCount: polishResponse.split(/\s+/).length,
+        wordCount: polishWordCount,
       },
     });
+    progress.onStage('polishing', 'Content polished', formatAgentOutput('polished', { content: polishResponse, wordCount: polishWordCount }));
     logger.info(`Draft polished for job ${jobId}`);
 
     // --- Stage 5: Review ---
-    progress.onStage('reviewing', 'Reviewing content');
+    progress.onStage('reviewing', 'Running quality checks...');
     job = await stateStore.updateJob(jobId, { status: 'reviewing' });
 
     const reviewResponse = await callLLM(anthropic, reviewSystemPrompt, buildReviewPrompt(job), {
@@ -259,11 +273,12 @@ export async function runPipeline(
           strengths: [],
         },
       });
-      progress.onStage('human_review', 'Ready for your review');
+      progress.onStage('human_review', 'Couldn\'t parse the review — flagging this for you to look at.');
       return job;
     }
 
     job = await stateStore.updateJob(jobId, { review });
+    progress.onStage('reviewing', 'Review complete', formatAgentOutput('review', review));
 
     // Decide next action
     if (review.status === 'approved' || review.score >= 60) {
@@ -273,8 +288,16 @@ export async function runPipeline(
         output: job.polishedDraft || job.draft,
         completedAt: new Date().toISOString(),
       });
-      progress.onStage('complete', 'Pipeline complete');
+      progress.onStage('complete', 'All done — content is ready!');
       logger.info(`Job completed: ${jobId}`, { score: review.score });
+
+      // Store this interaction for future personalization
+      await clientStore.storeClientContext(job.clientId, {
+        type: 'content',
+        text: `Created ${job.type} about "${job.input.topic}" for ${job.input.platform || 'general'}. Score: ${review.score}`,
+        metadata: { jobId: job.id, score: review.score },
+      });
+
       return job;
     }
 
@@ -286,14 +309,14 @@ export async function runPipeline(
         job = await stateStore.updateJob(jobId, { status: 'human_review' });
         review.status = 'needs_human_review';
         review.notes = 'Max iterations reached';
-        progress.onStage('human_review', 'Ready for your review (max iterations reached)');
+        progress.onStage('human_review', 'Hit the max revision limit — needs your eyes on it.');
         logger.info(`Max iterations reached for job ${jobId}`);
         return job;
       }
 
       // Loop back for revision
       revisionIssues = review.issues || [];
-      progress.onStage('revision', 'Revising based on feedback');
+      progress.onStage('revision', 'Not quite there yet, going back for another revision...');
       job = await stateStore.updateJob(jobId, { status: 'revision' });
       logger.info(`Revision requested for job ${jobId}`, { iteration: newIteration, issues: review.issues });
       continue;
@@ -301,13 +324,13 @@ export async function runPipeline(
 
     // needs_human_review or unexpected status
     job = await stateStore.updateJob(jobId, { status: 'human_review' });
-    progress.onStage('human_review', 'Ready for your review');
+    progress.onStage('human_review', 'This one needs your review before we can finalize it.');
     logger.info(`Human review required for job ${jobId}`);
     return job;
   }
 
   // Fallback: if loop exhausts without returning
   job = await stateStore.updateJob(jobId, { status: 'human_review' });
-  progress.onStage('human_review', 'Ready for your review (max iterations reached)');
+  progress.onStage('human_review', 'Hit the max revision limit — needs your eyes on it.');
   return job;
 }

@@ -24,6 +24,8 @@ vi.mock('../../../src/memory/client-store', () => ({
     saveProfile: vi.fn().mockResolvedValue(undefined),
     getBrandVoice: vi.fn().mockResolvedValue(null),
     getContentPillars: vi.fn().mockResolvedValue([]),
+    searchClientContext: vi.fn().mockResolvedValue([]),
+    storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

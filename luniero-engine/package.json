@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:agents": "vitest run tests/agents",
+    "test:integration": "vitest run tests/integration"
   },
   "keywords": [],
   "author": "",

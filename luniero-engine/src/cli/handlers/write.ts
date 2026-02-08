@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { HandlerContext, HandlerResult } from '../router';
 import { withLastJob, withLastHandler, withPendingApproval } from '../session';
-import { formatError, formatInfo, formatSuccess, formatJobSummary, formatContentOutput } from '../formatter';
+import { formatError, formatInfo, formatSuccess, formatTaskComplete, shortId } from '../formatter';
 import { promptForClient, promptForMissing } from '../utils/prompts';
 import { stateStore } from '../../core/state-store';
 import { runPipeline } from '../pipeline';
@@ -55,33 +55,29 @@ export async function handleWrite(ctx: HandlerContext): Promise<HandlerResult> {
     maxIterations: 5,
   });
 
-  output(formatSuccess(`Job created: ${jobId}`));
-  output(formatInfo('Running pipeline...'));
+  output(formatSuccess(`Job created: ${shortId(jobId)}`));
+  output(formatInfo('Kicking off the pipeline...'));
 
   // Run pipeline in-process with real-time progress
   try {
     const finalJob = await runPipeline(jobId, {
-      onStage: (status, label) => {
+      onStage: (status, label, formattedOutput) => {
         output(formatInfo(label));
+        if (formattedOutput) {
+          output(formattedOutput);
+        }
       },
     });
 
-    if (finalJob.status === 'complete' || finalJob.status === 'human_review') {
-      output(formatSuccess('Pipeline complete'));
+    if (finalJob.status === 'complete') {
+      output(formatSuccess('Content ready for approval'));
+      output(formatInfo('Type "approve", "revise", or "reject" to continue.'));
+    } else if (finalJob.status === 'human_review') {
+      output(formatSuccess('Content flagged for review'));
+      output(formatInfo('Type "approve", "revise", or "reject" to continue.'));
     }
-    output(formatJobSummary(finalJob));
 
-    if (finalJob.output) {
-      const content = typeof finalJob.output === 'string' ? finalJob.output : finalJob.output.content || JSON.stringify(finalJob.output);
-      const wordCount = content.split(/\s+/).filter(Boolean).length;
-      output(formatContentOutput({
-        content,
-        platform: platform?.charAt(0).toUpperCase() + (platform?.slice(1) || ''),
-        clientName: clientId,
-        wordCount,
-        score: finalJob.review?.score,
-      }));
-    }
+    output(formatTaskComplete());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await stateStore.updateJob(jobId, { status: 'failed', error: message });

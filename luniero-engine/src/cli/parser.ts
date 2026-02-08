@@ -1,4 +1,4 @@
-import { extractPlatform, extractContentType, extractTopic, looksLikeWriteRequest, looksLikeQuickRequest, looksLikeResearchRequest } from './utils/nlp';
+import { extractPlatform, extractContentType, extractTopic, looksLikeWriteRequest, looksLikeQuickRequest, looksLikeResearchRequest, looksLikeApprovalRequest } from './utils/nlp';
 
 export interface ParsedCommand {
   command: string;       // resolved slash command (e.g., '/write')
@@ -46,6 +46,9 @@ const ALIASES: Record<string, string> = {
   '/post': '/schedule',
   '/pub': '/publish',
   '/que': '/queue',
+  // Export
+  '/save': '/export',
+  '/out': '/export',
   // Utility
   '/s': '/status',
   '/hist': '/history',
@@ -66,6 +69,7 @@ const VALID_COMMANDS = new Set([
   '/status', '/history', '/show',
   '/help', '/settings', '/debug', '/quit',
   '/upload', '/uploads', '/repurpose', '/trending',
+  '/export',
 ]);
 
 export function parse(input: string): ParsedCommand {
@@ -122,7 +126,11 @@ function parseNLP(input: string, rawInput: string): ParsedCommand {
 
   let command = '';
 
-  if (looksLikeWriteRequest(input)) {
+  // Check for approval-style input first (approve, revise, reject, yes, ok, etc.)
+  const approvalIntent = looksLikeApprovalRequest(input);
+  if (approvalIntent) {
+    command = `/${approvalIntent}`;
+  } else if (looksLikeWriteRequest(input)) {
     command = '/write';
   } else if (looksLikeQuickRequest(input)) {
     command = '/quick';

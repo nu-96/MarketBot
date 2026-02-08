@@ -279,6 +279,83 @@ export function formatClientInfo(profile: { id: string; name: string; industry: 
   return lines.join('\n');
 }
 
+export function formatTaskComplete(): string {
+  return colors.dim('─'.repeat(50) + '\n Ready for next command\n' + '─'.repeat(50));
+}
+
+function formatReviewStatus(status: string): string {
+  switch (status) {
+    case 'approved': return colors.green('Approved ✓');
+    case 'needs_revision': return colors.yellow('Needs Revision');
+    case 'needs_human_review': return colors.yellow('Awaiting Your Review');
+    default: return status;
+  }
+}
+
+export function formatAgentOutput(stage: string, data: any): string {
+  const lines: string[] = [];
+  const border = colors.dim('─'.repeat(50));
+
+  switch (stage) {
+    case 'brief':
+      lines.push(colors.bold(colors.cyan('  Content Brief')));
+      lines.push(border);
+      lines.push(`${colors.bold('Title:')} ${data.title || 'Untitled'}`);
+      lines.push(`${colors.bold('Type:')} ${data.type || 'N/A'}`);
+      lines.push(`${colors.bold('Platform:')} ${data.platform || 'General'}`);
+      lines.push(`${colors.bold('Target Audience:')} ${data.targetAudience || 'N/A'}`);
+      lines.push(`${colors.bold('Word Count:')} ${data.wordCount || 'N/A'}`);
+      lines.push(`${colors.bold('Tone:')} ${data.tone || 'N/A'}`);
+      if (data.keyMessages?.length) {
+        lines.push(colors.bold('\nKey Messages:'));
+        data.keyMessages.forEach((m: string) => lines.push(`  • ${m}`));
+      }
+      break;
+
+    case 'draft':
+    case 'polished':
+      lines.push(colors.bold(colors.cyan(stage === 'draft' ? '  Draft' : '  Polished Content')));
+      lines.push(border);
+      lines.push(typeof data === 'string' ? data : (data.content || data));
+      lines.push(border);
+      if (data.wordCount) lines.push(colors.dim(`Words: ${data.wordCount}`));
+      break;
+
+    case 'review':
+      lines.push(colors.bold(colors.cyan('  Review Results')));
+      lines.push(border);
+      const scoreColor = data.score >= 80 ? colors.green : data.score >= 60 ? colors.yellow : colors.red;
+      lines.push(`${colors.bold('Score:')} ${scoreColor(data.score + '/100')}`);
+      lines.push(`${colors.bold('Status:')} ${formatReviewStatus(data.status)}`);
+      if (data.strengths?.length) {
+        lines.push(colors.bold('\nStrengths:'));
+        data.strengths.forEach((s: string) => lines.push(`  ${colors.green('✓')} ${s}`));
+      }
+      if (data.issues?.length) {
+        lines.push(colors.bold('\nIssues:'));
+        data.issues.forEach((i: string) => lines.push(`  ${colors.yellow('!')} ${i}`));
+      }
+      break;
+
+    default:
+      lines.push(colors.bold(colors.cyan(`  ${stage}`)));
+      lines.push(border);
+      for (const [key, value] of Object.entries(data || {})) {
+        if (typeof value === 'string') {
+          lines.push(`${colors.bold(key + ':')} ${value}`);
+        } else if (Array.isArray(value)) {
+          lines.push(`${colors.bold(key + ':')} ${value.join(', ')}`);
+        }
+      }
+  }
+
+  return lines.join('\n');
+}
+
+export function shortId(id: string): string {
+  return id.slice(0, 8);
+}
+
 export function formatPrompt(clientId: string | null): string {
   const client = clientId ? colors.cyan(clientId) : colors.dim('no-client');
   return `${client} ${colors.dim('>')} `;

@@ -75,7 +75,7 @@ describe('handleApprove', () => {
     await handleApprove(ctx);
 
     const calls = (ctx.output as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
-    expect(calls.some((msg: string) => msg.includes('Job ID') && msg.toLowerCase().includes('required'))).toBe(true);
+    expect(calls.some((msg: string) => msg.includes('No pending job'))).toBe(true);
   });
 
   it('should approve job in human_review', async () => {

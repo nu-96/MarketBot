@@ -1,5 +1,12 @@
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
 interface LogEntry {
   timestamp: string;
   level: LogLevel;
@@ -10,6 +17,16 @@ interface LogEntry {
 }
 
 class Logger {
+  private minLevel: LogLevel = 'warn';
+
+  setLevel(level: LogLevel) {
+    this.minLevel = level;
+  }
+
+  getLevel(): LogLevel {
+    return this.minLevel;
+  }
+
   private formatEntry(entry: LogEntry): string {
     const prefix = entry.agent ? `[${entry.agent}]` : '';
     const jobPrefix = entry.jobId ? `[${entry.jobId}]` : '';
@@ -17,6 +34,10 @@ class Logger {
   }
 
   private log(level: LogLevel, message: string, data?: any, context?: { agent?: string; jobId?: string }) {
+    if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[this.minLevel]) {
+      return;
+    }
+
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,

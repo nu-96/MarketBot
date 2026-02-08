@@ -87,6 +87,14 @@ export function looksLikeQuickRequest(input: string): boolean {
   return quickPatterns.some(p => p.test(lower));
 }
 
+export function looksLikeApprovalRequest(input: string): 'approve' | 'revise' | 'reject' | null {
+  const lower = input.toLowerCase().trim();
+  if (/^(approve|yes|ok|lgtm|looks good|ship it|good to go)\b/.test(lower)) return 'approve';
+  if (/^(revise|edit|change|fix|redo|try again|rework)\b/.test(lower)) return 'revise';
+  if (/^(reject|no|nope|scrap|discard|trash|kill)\b/.test(lower)) return 'reject';
+  return null;
+}
+
 export function looksLikeResearchRequest(input: string): boolean {
   const lower = input.toLowerCase().trim();
   const researchPatterns = [

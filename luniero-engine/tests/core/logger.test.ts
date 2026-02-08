@@ -6,10 +6,12 @@ describe('Logger', () => {
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.setLevel('debug'); // Enable all levels for testing
   });
 
   afterEach(() => {
     consoleSpy.mockRestore();
+    logger.setLevel('warn'); // Restore default
   });
 
   it('should log info messages', () => {
@@ -85,5 +87,23 @@ describe('Logger', () => {
   it('should handle complex nested data', () => {
     logger.info('nested', { a: { b: { c: [1, 2, 3] } } });
     expect(consoleSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('should suppress messages below the minimum level', () => {
+    logger.setLevel('warn');
+    logger.debug('hidden debug');
+    logger.info('hidden info');
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    logger.warn('visible warn');
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+
+    logger.error('visible error');
+    expect(consoleSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('should default to warn level', () => {
+    logger.setLevel('warn'); // reset
+    expect(logger.getLevel()).toBe('warn');
   });
 });

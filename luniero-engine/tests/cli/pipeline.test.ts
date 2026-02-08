@@ -52,6 +52,8 @@ vi.mock('../../src/memory/client-store', () => ({
     }),
     getContentPillars: vi.fn().mockResolvedValue(['innovation', 'leadership']),
     getRecentFeedback: vi.fn().mockResolvedValue([]),
+    searchClientContext: vi.fn().mockResolvedValue([]),
+    storeClientContext: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

@@ -36,11 +36,11 @@ export function withLastCommand(session: Session, command: string): Session {
   return updateSession(session, { lastCommand: command, history });
 }
 
-export function withLastJob(session: Session, jobId: string): Session {
+export function withLastJob(session: Session, jobId: string | null): Session {
   return updateSession(session, { lastJobId: jobId });
 }
 
-export function withLastHandler(session: Session, handler: string): Session {
+export function withLastHandler(session: Session, handler: string | null): Session {
   return updateSession(session, { lastHandler: handler });
 }
 

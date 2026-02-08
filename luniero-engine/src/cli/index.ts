@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 import { logger } from '../utils/logger';
-import { parse } from './parser';
+import { parse, VALID_COMMANDS, ALIASES } from './parser';
 import { CommandRouter, HandlerContext } from './router';
 import { createSession, withLastCommand, withLastHandler, Session } from './session';
 import { formatWelcome, formatPrompt, formatError, formatInfo } from './formatter';
@@ -17,8 +17,24 @@ import { handleHelp, handleSettings } from './handlers/help';
 import { handleDebug } from './handlers/debug';
 import { handleUpload, handleUploads } from './handlers/upload';
 import { handleRepurpose, handleTrending } from './handlers/content';
+import { handleExport } from './handlers/export';
 
 const VERSION = '1.0.0';
+
+function createCompleter(): readline.Completer {
+  const allCommands = [...VALID_COMMANDS, ...Object.keys(ALIASES)].sort();
+
+  return (line: string): [string[], string] => {
+    if (!line.startsWith('/')) {
+      return [[], line];
+    }
+    const hits = allCommands.filter(cmd => cmd.startsWith(line.toLowerCase()));
+    if (line === '/') {
+      return [[...VALID_COMMANDS].sort(), line];
+    }
+    return [hits.length ? hits : allCommands, line];
+  };
+}
 
 function createRouter(): CommandRouter {
   const router = new CommandRouter();
@@ -45,6 +61,8 @@ function createRouter(): CommandRouter {
   router.register('/uploads', handleUploads);
   router.register('/repurpose', handleRepurpose);
   router.register('/trending', handleTrending);
+  router.register('/export', handleExport);
+  router.register('/save', handleExport);
 
   // NLP fallback: unrecognized natural language shows help hint
   router.registerNLPFallback(async (ctx) => {
@@ -64,6 +82,7 @@ export async function startREPL(options?: {
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    completer: createCompleter(),
   });
 
   const output = options?.output || ((text: string) => console.log(text));
