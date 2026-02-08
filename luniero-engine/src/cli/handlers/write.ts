@@ -69,12 +69,9 @@ export async function handleWrite(ctx: HandlerContext): Promise<HandlerResult> {
       },
     });
 
-    if (finalJob.status === 'complete') {
-      output(formatSuccess('Content ready for approval'));
-      output(formatInfo('Type "approve", "revise", or "reject" to continue.'));
-    } else if (finalJob.status === 'human_review') {
-      output(formatSuccess('Content flagged for review'));
-      output(formatInfo('Type "approve", "revise", or "reject" to continue.'));
+    if (finalJob.status === 'human_review') {
+      output(formatSuccess('Content ready — awaiting your approval'));
+      output(formatInfo('Type "approve", "revise <feedback>", or "reject" to continue.'));
     }
 
     output(formatTaskComplete());

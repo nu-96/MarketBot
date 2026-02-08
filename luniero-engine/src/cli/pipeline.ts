@@ -95,7 +95,9 @@ ${revisionIssues.map((i: string) => `- ${i}`).join('\n')}
 Please address these issues in your new draft.`;
   }
 
-  return `Write content based on this brief:
+  return `Write the ACTUAL ${brief.type} content based on this brief.
+
+**CRITICAL:** Output the real, publishable content itself — NOT tips, advice, or explanations about how to write it. Write it as if you are the copywriter delivering final work.
 
 **Brief:**
 - Title: ${brief.title}
@@ -115,13 +117,15 @@ ${brief.structure.map((s: any) => `- ${s.section}: ${s.notes}`).join('\n')}
 ${JSON.stringify(job.context?.brandVoice || {})}
 ${revisionContext}
 
-Write the content now. Output ONLY the final content, nothing else.`;
+Now write the actual ${brief.type}. Output ONLY the content itself — no preamble, no "here's the post", no explanations.`;
 }
 
 function buildPolishPrompt(job: Job): string {
-  return `Polish this draft to match the brand voice and maximize engagement:
+  return `Polish this ${job.brief.type} draft to match the brand voice and maximize engagement.
 
-**Draft:**
+**CRITICAL:** Output the polished content itself — NOT suggestions or tips on how to improve it. You are delivering the final polished version.
+
+**Draft to polish:**
 ${job.draft.content}
 
 **Brief:**
@@ -134,7 +138,7 @@ ${job.draft.content}
 - Avoid: ${JSON.stringify(job.context?.brandVoice?.avoid || [])}
 - Examples: ${JSON.stringify(job.context?.brandVoice?.examples || [])}
 
-Polish the content while maintaining the core message. Output ONLY the polished content.`;
+Output ONLY the polished ${job.brief.type} content — no commentary, no "here's the improved version", just the content itself.`;
 }
 
 function buildReviewPrompt(job: Job): string {
@@ -282,22 +286,13 @@ export async function runPipeline(
 
     // Decide next action
     if (review.status === 'approved' || review.score >= 60) {
-      // Approved — mark complete
+      // Content looks good — but ALWAYS require human approval before completing
       job = await stateStore.updateJob(jobId, {
-        status: 'complete',
+        status: 'human_review',
         output: job.polishedDraft || job.draft,
-        completedAt: new Date().toISOString(),
       });
-      progress.onStage('complete', 'All done — content is ready!');
-      logger.info(`Job completed: ${jobId}`, { score: review.score });
-
-      // Store this interaction for future personalization
-      await clientStore.storeClientContext(job.clientId, {
-        type: 'content',
-        text: `Created ${job.type} about "${job.input.topic}" for ${job.input.platform || 'general'}. Score: ${review.score}`,
-        metadata: { jobId: job.id, score: review.score },
-      });
-
+      progress.onStage('human_review', `Content ready (score: ${review.score}) — awaiting your approval.`);
+      logger.info(`Job ready for approval: ${jobId}`, { score: review.score });
       return job;
     }
 

@@ -3,6 +3,7 @@ import { withLastHandler, withLastJob, withPendingApproval } from '../session';
 import { formatError, formatSuccess, formatInfo, shortId } from '../formatter';
 import { promptForMissing } from '../utils/prompts';
 import { stateStore } from '../../core/state-store';
+import { clientStore } from '../../memory/client-store';
 
 export async function handleApprove(ctx: HandlerContext): Promise<HandlerResult> {
   const { session, parsed, rl, output } = ctx;
@@ -25,7 +26,20 @@ export async function handleApprove(ctx: HandlerContext): Promise<HandlerResult>
   }
 
   const newStatus = job.status === 'brief_pending_approval' ? 'drafting' : 'complete';
-  await stateStore.updateJob(jobId, { status: newStatus as any });
+  await stateStore.updateJob(jobId, { 
+    status: newStatus as any,
+    completedAt: newStatus === 'complete' ? new Date().toISOString() : undefined,
+  });
+  
+  // Store interaction for future personalization when content is approved
+  if (newStatus === 'complete' && job.review?.score) {
+    await clientStore.storeClientContext(job.clientId, {
+      type: 'content',
+      text: `Created ${job.type} about "${job.input.topic}" for ${job.input.platform || 'general'}. Score: ${job.review.score}`,
+      metadata: { jobId: job.id, score: job.review.score },
+    });
+  }
+  
   output(formatSuccess(`Job ${shortId(jobId)} approved. Status → ${newStatus}`));
   output(formatInfo('Task complete. Ready for next command.'));
 
