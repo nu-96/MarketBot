@@ -373,6 +373,11 @@ class ClientStore {
         .slice(0, limit);
     }
   }
+
+  // Alias for convenience
+  async listClients(): Promise<ClientProfile[]> {
+    return this.getAllClients();
+  }
 }
 
 export const clientStore = new ClientStore();

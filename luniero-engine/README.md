@@ -2,6 +2,65 @@
 
 A multi-agent AI system for marketing agencies that creates content across platforms, generates reports, tracks competitors, and manages client workflows using distributed architecture with parallel processing.
 
+## Quick Start (30 seconds)
+
+```bash
+# 1. Install
+cd luniero-engine && npm install
+
+# 2. Configure (just need Anthropic key to start)
+cp .env.example .env
+# Edit .env: ANTHROPIC_API_KEY=sk-ant-your-key
+
+# 3. Start Redis
+docker run -d --name luniero-redis -p 6379:6379 redis:alpine
+
+# 4. Health check
+npm run health
+
+# 5. Create a client and generate content
+npm run run -- client new acme "Acme Corp" "B2B SaaS"
+npm run run -- write acme "AI trends in 2026" --platform=linkedin
+```
+
+## Simple CLI Commands
+
+The new simplified CLI (`npm run run`) provides one-shot commands without entering the full REPL:
+
+```bash
+# Create content
+npm run run -- write <clientId> <topic> [--platform=X] [--type=X] [--tone=X]
+
+# Check job status  
+npm run run -- status <jobId>
+
+# Manage clients
+npm run run -- client new <id> <name> [industry]
+npm run run -- client list
+npm run run -- client info <id>
+
+# System health
+npm run run -- health
+
+# Full interactive mode
+npm run run -- repl
+```
+
+### Examples
+
+```bash
+# LinkedIn post about AI
+npm run run -- write acme "How AI is changing B2B sales" --platform=linkedin
+
+# Blog post with specific tone
+npm run run -- write acme "2026 marketing trends" --type=blog_post --tone=conversational
+
+# Check a job
+npm run run -- status abc123-def456
+```
+
+---
+
 ## Architecture
 
 ```

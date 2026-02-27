@@ -17,7 +17,7 @@ interface LogEntry {
 }
 
 class Logger {
-  private minLevel: LogLevel = 'warn';
+  private minLevel: LogLevel = (process.env.LOG_LEVEL as LogLevel) || 'warn';
 
   setLevel(level: LogLevel) {
     this.minLevel = level;

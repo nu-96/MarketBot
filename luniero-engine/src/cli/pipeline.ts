@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { config } from '../config';
+import { config, requireConfig } from '../config';
 import { stateStore, Job } from '../core/state-store';
 import { clientStore } from '../memory/client-store';
 import { logger } from '../utils/logger';
@@ -287,6 +287,9 @@ export async function runPipeline(
   jobId: string,
   progress: PipelineProgress,
 ): Promise<Job> {
+  // Validate config before starting
+  requireConfig(['anthropicApiKey']);
+  
   const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
   const briefSystemPrompt = loadSystemPrompt('brief-agent');
